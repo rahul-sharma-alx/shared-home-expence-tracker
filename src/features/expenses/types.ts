@@ -1,4 +1,4 @@
-import type { DemoUser } from "@/src/features/room/types";
+import type { RoomPerspective } from "@/src/features/room/types";
 
 export type ExpenseCategoryId =
   | "rent"
@@ -18,10 +18,10 @@ export type Expense = {
   amount: number;
   date: string;
   category: ExpenseCategoryId;
-  paidBy: DemoUser;
+  paidBy: RoomPerspective;
   split: ExpenseSplit;
   note?: string;
-  createdBy: DemoUser;
+  createdBy: RoomPerspective;
   createdByUid?: string;
   paidByUid?: string;
   updatedAt?: string;

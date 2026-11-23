@@ -36,9 +36,8 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearSca
 import { Doughnut, Bar } from "react-chartjs-2";
 import { CATEGORIES, type Expense, type ExpenseCategoryId, type ExpenseSplit } from "@/src/features/expenses/types";
 import { calculateBalances, categoryTotals, filterExpensesByMonth, formatINR, buildUpiUri, buildWhatsAppUri, exportFilteredCsv } from "@/src/features/expenses/calculations";
-import { loadDemoState, saveDemoState, SAMPLE_STATE, type DemoState } from "@/src/features/room/demo-repository";
 import type { Settlement } from "@/src/features/settlements/types";
-import type { DemoUser } from "@/src/features/room/types";
+import type { RoomPerspective, RoomState } from "@/src/features/room/types";
 import { firebaseAuth, firestore, isFirebaseConfigured } from "@/src/lib/firebase/client";
 import {
   createRoom,
@@ -47,7 +46,7 @@ import {
   saveUserProfile,
   subscribeToProfile,
   subscribeToRoom,
-  toDemoState,
+  toRoomState,
   updateRoomSettings,
   type CloudRoom,
   type RoomMember,
@@ -65,13 +64,34 @@ const FIXED_BILLS = [
   { title: "Water Supply Bill", amount: 360, category: "water" as ExpenseCategoryId },
 ];
 
+const EMPTY_ROOM_STATE: RoomState = {
+  room: {
+    code: "",
+    name: "",
+    budgetCap: 0,
+    youName: "",
+    youPhone: "",
+    youUpi: "",
+    friendName: "",
+    friendPhone: "",
+    friendUpi: "",
+  },
+  expenses: [],
+  settlements: [],
+};
+
 function createId() {
   return crypto.randomUUID();
 }
 
+function getLocalDateString() {
+  const date = new Date();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 export function RoomSplitApp() {
-  const [demoMode, setDemoMode] = useState(false);
-  const [demoState, setDemoState] = useState<DemoState>(SAMPLE_STATE);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -92,8 +112,16 @@ export function RoomSplitApp() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
   const [roomName, setRoomName] = useState("");
-  const [budgetCap, setBudgetCap] = useState("18000");
+  const [budgetCap, setBudgetCap] = useState("");
   const [inviteToken, setInviteToken] = useState("");
+
+  useEffect(() => {
+    try {
+      window.localStorage.removeItem("roomsplit_state_v2");
+    } catch (error) {
+      console.error("Could not remove legacy demo data from local storage.", error);
+    }
+  }, []);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -165,17 +193,13 @@ export function RoomSplitApp() {
     });
   }, [authUser, profile?.roomId]);
 
-  const state = useMemo(() => {
-    if (demoMode) return demoState;
-    return cloudRoom && authUser
-      ? toDemoState(cloudRoom, members, cloudExpenses, cloudSettlements, authUser.uid)
-      : SAMPLE_STATE;
-  }, [demoMode, demoState, cloudRoom, members, cloudExpenses, cloudSettlements, authUser]);
+  const state = useMemo(
+    () => cloudRoom && authUser
+      ? toRoomState(cloudRoom, members, cloudExpenses, cloudSettlements, authUser.uid)
+      : EMPTY_ROOM_STATE,
+    [cloudRoom, members, cloudExpenses, cloudSettlements, authUser],
+  );
   const roomLoading = Boolean(profile?.roomId && !cloudRoom);
-
-  useEffect(() => {
-    if (demoMode) saveDemoState(demoState);
-  }, [demoMode, demoState]);
 
   useEffect(() => {
     if (!toast) return;
@@ -203,7 +227,6 @@ export function RoomSplitApp() {
   );
 
   function canModify(expense: Expense) {
-    if (demoMode) return (expense.createdBy || expense.paidBy) === "you";
     return Boolean(authUser && expense.createdByUid === authUser.uid);
   }
 
@@ -213,24 +236,6 @@ export function RoomSplitApp() {
   }
 
   async function saveExpense(expense: Expense) {
-    if (demoMode) {
-      const localExpense = {
-        ...expense,
-        paidBy: "you" as const,
-        createdBy: "you" as const,
-        paidByUid: undefined,
-        createdByUid: undefined,
-      };
-      setDemoState((current) => ({
-        ...current,
-        expenses: editingExpense
-          ? current.expenses.map((item) => item.id === expense.id ? localExpense : item)
-          : [...current.expenses, localExpense],
-      }));
-      setModal(null);
-      setToast(editingExpense ? "Expense updated" : "Expense added");
-      return;
-    }
     if (!firestore || !authUser || !profile?.roomId) return;
     try {
       await setDoc(doc(firestore, "rooms", profile.roomId, "expenses", expense.id), {
@@ -252,11 +257,6 @@ export function RoomSplitApp() {
   }
 
   async function deleteExpense(id: string) {
-    if (demoMode) {
-      setDemoState((current) => ({ ...current, expenses: current.expenses.filter((expense) => expense.id !== id) }));
-      setToast("Expense deleted");
-      return;
-    }
     if (!firestore || !profile?.roomId) return;
     try {
       await removeDocument(firestore, profile.roomId, "expenses", id);
@@ -310,10 +310,6 @@ export function RoomSplitApp() {
   }
 
   async function handleSignOut() {
-    if (demoMode) {
-      setDemoMode(false);
-      return;
-    }
     if (!firebaseAuth) return;
     try {
       await signOut(firebaseAuth);
@@ -354,20 +350,6 @@ export function RoomSplitApp() {
   }
 
   async function handleSaveProfile(nextProfile: UserProfile) {
-    if (demoMode) {
-      setDemoState((current) => ({
-        ...current,
-        room: {
-          ...current.room,
-          youName: nextProfile.name,
-          youPhone: nextProfile.phone,
-          youUpi: nextProfile.upiId,
-        },
-      }));
-      setProfileOpen(false);
-      setToast("Profile saved");
-      return;
-    }
     if (!firestore || !authUser) return;
     try {
       await saveUserProfile(firestore, authUser.uid, nextProfile);
@@ -380,12 +362,6 @@ export function RoomSplitApp() {
   }
 
   async function handleSaveRoom(name: string, budget: number) {
-    if (demoMode) {
-      setDemoState((current) => ({ ...current, room: { ...current.room, name, budgetCap: budget } }));
-      setModal(null);
-      setToast("Room settings saved");
-      return;
-    }
     if (!firestore || !cloudRoom) return;
     try {
       await updateRoomSettings(firestore, cloudRoom.id, name, budget);
@@ -397,21 +373,6 @@ export function RoomSplitApp() {
   }
 
   async function saveSettlement(settlement: Settlement) {
-    if (demoMode) {
-      setDemoState((current) => ({
-        ...current,
-        settlements: [...current.settlements, {
-          ...settlement,
-          from: "you",
-          createdBy: "you",
-          createdByUid: undefined,
-          fromUid: undefined,
-        }],
-      }));
-      setModal(null);
-      setToast("Settlement recorded");
-      return;
-    }
     if (!firestore || !authUser || !profile?.roomId) return;
     try {
       await setDoc(doc(firestore, "rooms", profile.roomId, "settlements", settlement.id), {
@@ -429,11 +390,6 @@ export function RoomSplitApp() {
   }
 
   async function deleteSettlement(id: string) {
-    if (demoMode) {
-      setDemoState((current) => ({ ...current, settlements: current.settlements.filter((settlement) => settlement.id !== id) }));
-      setToast("Settlement deleted");
-      return;
-    }
     if (!firestore || !profile?.roomId) return;
     try {
       await removeDocument(firestore, profile.roomId, "settlements", id);
@@ -446,13 +402,6 @@ export function RoomSplitApp() {
   async function copyRoomInvite() {
     if (!cloudRoom) return;
     await copyText(`${window.location.origin}/#join=${cloudRoom.inviteToken}`, "Invite link copied");
-  }
-
-  function startDemoMode() {
-    const savedState = loadDemoState();
-    savedState.activeDemoUser = "you";
-    setDemoState(savedState);
-    setDemoMode(true);
   }
 
   function downloadCsv() {
@@ -503,31 +452,31 @@ export function RoomSplitApp() {
   };
 
   const accountProfile = profile || {
-    name: state.room.youName,
-    email: authUser?.email || "demo@roomsplit.local",
-    phone: state.room.youPhone,
-    upiId: state.room.youUpi,
+    name: authUser?.displayName || "",
+    email: authUser?.email || "",
+    phone: "",
+    upiId: "",
     roomId: null,
   };
 
   if (!authReady) return <CenteredMessage message="Loading RoomSplit…" />;
 
-  if (!demoMode && !isFirebaseConfigured) {
-    return <LoginScreen configured={false} busy={false} error="Firebase is not configured. Add the NEXT_PUBLIC_FIREBASE_* values from .env.example to enable Google sign-in." onSignIn={handleGoogleSignIn} onTryDemo={startDemoMode} />;
+  if (!isFirebaseConfigured) {
+    return <LoginScreen configured={false} busy={false} error="Firebase is not configured. Add the NEXT_PUBLIC_FIREBASE_* values to .env.local to enable sign-in." onSignIn={handleGoogleSignIn} />;
   }
 
-  if (!demoMode && !authUser) {
-    return <LoginScreen configured busy={loginBusy} error={dataError} onSignIn={handleGoogleSignIn} onTryDemo={startDemoMode} />;
+  if (!authUser) {
+    return <LoginScreen configured busy={loginBusy} error={dataError} onSignIn={handleGoogleSignIn} />;
   }
 
-  if (!demoMode && !profile) {
+  if (!profile) {
     return <CenteredMessage message={dataError || "Loading your account…"} error={Boolean(dataError)} />;
   }
-  if (!demoMode && profile?.roomId && roomLoading && !dataError) return <CenteredMessage message="Loading your room…" />;
-  if (!demoMode && profile?.roomId && !cloudRoom && dataError) return <CenteredMessage message={dataError} error />;
+  if (profile.roomId && roomLoading && !dataError) return <CenteredMessage message="Loading your room…" />;
+  if (profile.roomId && !cloudRoom && dataError) return <CenteredMessage message={dataError} error />;
 
-  if (!demoMode && (!profile?.roomId || !cloudRoom)) {
-    if (!authUser || !profile) return <CenteredMessage message="Loading your account…" />;
+  if (!profile.roomId || !cloudRoom) {
+    if (!authUser) return <CenteredMessage message="Loading your account…" />;
     return (
       <>
         <RoomSetupScreen
@@ -568,14 +517,14 @@ export function RoomSplitApp() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-bold tracking-tight">RoomSplit</span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${demoMode ? "bg-zinc-100 text-zinc-500" : "bg-emerald-50 text-emerald-700"}`}>{demoMode ? "Demo" : "Live"}</span>
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">Live</span>
               </div>
               <p className="max-w-36 truncate text-xs text-zinc-500 sm:max-w-none">{state.room.name} · {state.room.code}</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <button type="button" onClick={() => setProfileOpen(true)} aria-label="Open profile" className="max-w-20 truncate rounded-lg border border-zinc-200 px-2 py-2 text-[11px] font-semibold sm:max-w-none sm:px-3 sm:text-xs">{accountProfile.name || authUser?.displayName || "Profile"}</button>
-            <button type="button" onClick={handleSignOut} aria-label={demoMode ? "Exit demo mode" : "Sign out"} className="rounded-lg border border-zinc-200 px-2 py-2 text-[11px] font-semibold text-zinc-600 sm:px-3 sm:text-xs"><span className="sm:hidden">{demoMode ? "Exit" : "Log out"}</span><span className="hidden sm:inline">{demoMode ? "Exit demo" : "Sign out"}</span></button>
+            <button type="button" onClick={handleSignOut} aria-label="Sign out" className="rounded-lg border border-zinc-200 px-2 py-2 text-[11px] font-semibold text-zinc-600 sm:px-3 sm:text-xs"><span className="sm:hidden">Log out</span><span className="hidden sm:inline">Sign out</span></button>
             <button type="button" onClick={() => openExpense()} aria-label="Add expense" className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-2.5 text-xs font-semibold text-white sm:px-3">
               <Plus size={15} /> <span className="hidden sm:inline">Add Expense</span>
             </button>
@@ -760,10 +709,8 @@ export function RoomSplitApp() {
               </div>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => setModal("settings")} disabled={!demoMode && cloudRoom?.ownerUid !== authUser?.uid} className="rounded-lg border border-zinc-200 p-4 text-left disabled:opacity-50"><p className="font-semibold">Room settings</p><p className="mt-1 text-xs text-zinc-500">Name and monthly budget · owner only</p></button>
-              {demoMode ? (
-                <div className="rounded-lg border border-zinc-200 p-4"><p className="font-semibold">Invite roommate</p><p className="mt-1 text-xs text-zinc-500">Room sharing is available after Google sign-in.</p></div>
-              ) : cloudRoom?.roommateUid ? (
+              <button type="button" onClick={() => setModal("settings")} disabled={cloudRoom.ownerUid !== authUser.uid} className="rounded-lg border border-zinc-200 p-4 text-left disabled:opacity-50"><p className="font-semibold">Room settings</p><p className="mt-1 text-xs text-zinc-500">Name and monthly budget · owner only</p></button>
+              {cloudRoom.roommateUid ? (
                 <div className="rounded-lg border border-zinc-200 p-4"><p className="font-semibold">Roommate joined</p><p className="mt-1 text-xs text-zinc-500">{state.room.friendName} is a member of this room.</p></div>
               ) : (
                 <button type="button" onClick={() => void copyRoomInvite()} className="rounded-lg border border-zinc-200 p-4 text-left"><p className="font-semibold">Invite roommate</p><p className="mt-1 text-xs text-zinc-500">Copy a private link for room {state.room.code}</p></button>
@@ -805,15 +752,7 @@ export function RoomSplitApp() {
         />
       )}
       {modal === "settings" && (
-        <SettingsModal room={cloudRoom || {
-          id: "demo",
-          code: state.room.code,
-          name: state.room.name,
-          budgetCap: state.room.budgetCap,
-          ownerUid: "demo",
-          roommateUid: null,
-          inviteToken: "",
-        }} onClose={() => setModal(null)} onSave={handleSaveRoom} />
+        cloudRoom && <SettingsModal room={cloudRoom} onClose={() => setModal(null)} onSave={handleSaveRoom} />
       )}
       {modal === "settlement" && (
         <SettlementModal state={state} balances={balances} onClose={() => setModal(null)} onSave={saveSettlement} />
@@ -832,7 +771,6 @@ export function RoomSplitApp() {
   );
 
   function canModifySettlement(settlement: Settlement) {
-    if (demoMode) return (settlement.createdBy || settlement.from) === "you";
     return Boolean(authUser && settlement.createdByUid === authUser.uid);
   }
 }
@@ -853,13 +791,11 @@ function LoginScreen({
   busy,
   error,
   onSignIn,
-  onTryDemo,
 }: {
   configured: boolean;
   busy: boolean;
   error: string;
   onSignIn: () => void;
-  onTryDemo: () => void;
 }) {
   const [provider, setProvider] = useState<"email" | "phone">("email");
   const [emailMode, setEmailMode] = useState<"signIn" | "signUp">("signIn");
@@ -1015,7 +951,6 @@ function LoginScreen({
           <span className="font-bold text-blue-600">G</span>
           {!configured ? "Google sign-in needs Firebase setup" : busy ? "Connecting to Google…" : "Continue with Google"}
         </button>
-        <button type="button" onClick={onTryDemo} className="mt-3 w-full rounded-lg px-4 py-2.5 text-sm font-semibold text-zinc-600 hover:bg-zinc-50">Try demo mode</button>
         <p className="mt-5 text-center text-xs leading-5 text-zinc-400">Phone sign-in requires Phone Authentication and SMS region policy to be configured in Firebase. Room data is only visible to room members.</p>
       </section>
     </main>
@@ -1165,7 +1100,7 @@ function ExpenseModal({
   onSave,
 }: {
   expense: Expense | null;
-  state: DemoState;
+  state: RoomState;
   month: string;
   authUid: string;
   busy: boolean;
@@ -1174,7 +1109,7 @@ function ExpenseModal({
 }) {
   const [title, setTitle] = useState(expense?.title || "");
   const [amount, setAmount] = useState(expense?.amount?.toString() || "");
-  const [date, setDate] = useState(expense?.date || (month === "all" ? "2026-11-23" : `${month}-23`));
+  const [date, setDate] = useState(expense?.date || (month === "all" ? getLocalDateString() : `${month}-01`));
   const [category, setCategory] = useState<ExpenseCategoryId>(expense?.category || "vegetables");
   const [split, setSplit] = useState<ExpenseSplit>(expense?.split || "50-50");
   const [note, setNote] = useState(expense?.note || "");
@@ -1248,13 +1183,13 @@ function SettlementModal({
   onClose,
   onSave,
 }: {
-  state: DemoState;
+  state: RoomState;
   balances: ReturnType<typeof calculateBalances>;
   onClose: () => void;
   onSave: (settlement: Settlement) => void;
 }) {
   const [amount, setAmount] = useState(balances.net < 0 ? Math.round(Math.abs(balances.net)).toString() : "");
-  const [date, setDate] = useState("2026-11-23");
+  const [date, setDate] = useState(getLocalDateString());
   const [note, setNote] = useState("");
 
   const upi = buildUpiUri("you", Number(amount), state.room);
@@ -1301,12 +1236,12 @@ function PaymentActions({
   balances,
   onToast,
 }: {
-  state: DemoState;
+  state: RoomState;
   balances: ReturnType<typeof calculateBalances>;
   onToast: (message: string) => void;
 }) {
   const amount = Math.round(Math.abs(balances.net));
-  const from: DemoUser = balances.net >= 0 ? "friend" : "you";
+  const from: RoomPerspective = balances.net >= 0 ? "friend" : "you";
   const upi = buildUpiUri(from, amount, state.room);
   const recipient = from === "friend" ? state.room.friendName : state.room.youName;
   const recipientPhone = from === "friend" ? state.room.friendPhone : state.room.youPhone;

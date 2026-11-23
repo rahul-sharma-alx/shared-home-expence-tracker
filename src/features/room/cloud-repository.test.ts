@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   mapCloudExpense,
   mapCloudSettlement,
-  toDemoState,
+  toRoomState,
   type CloudRoom,
   type RoomMember,
 } from "./cloud-repository";
@@ -49,8 +49,8 @@ const settlement: Settlement = {
 
 describe("roommate perspective mapping", () => {
   it("maps shared records relative to the signed-in user", () => {
-    const ownerView = toDemoState(room, members, [expense], [settlement], "uid-owner");
-    const roommateView = toDemoState(room, members, [expense], [settlement], "uid-roommate");
+    const ownerView = toRoomState(room, members, [expense], [settlement], "uid-owner");
+    const roommateView = toRoomState(room, members, [expense], [settlement], "uid-roommate");
 
     expect(ownerView.room.youName).toBe("Owner");
     expect(ownerView.expenses[0].createdBy).toBe("friend");

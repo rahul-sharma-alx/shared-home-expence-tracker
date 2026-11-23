@@ -9,9 +9,9 @@ import {
   writeBatch,
   type Firestore,
 } from "firebase/firestore";
-import type { DemoState } from "./demo-repository";
 import type { Expense } from "@/src/features/expenses/types";
 import type { Settlement } from "@/src/features/settlements/types";
+import type { RoomState } from "./types";
 
 export type UserProfile = {
   name: string;
@@ -290,13 +290,13 @@ export async function saveUserProfile(
   await batch.commit();
 }
 
-export function toDemoState(
+export function toRoomState(
   room: CloudRoom,
   members: RoomMember[],
   expenses: Expense[],
   settlements: Settlement[],
   currentUid: string,
-): DemoState {
+): RoomState {
   const own = members.find((member) => member.uid === currentUid);
   const friend = members.find((member) => member.uid !== currentUid);
   const expensesForUser = expenses.map((expense) => ({
@@ -321,7 +321,6 @@ export function toDemoState(
       friendPhone: friend?.phone || "",
       friendUpi: friend?.upiId || "",
     },
-    activeDemoUser: "you",
     expenses: expensesForUser,
     settlements: settlementsForUser,
   };

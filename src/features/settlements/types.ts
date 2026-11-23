@@ -1,12 +1,12 @@
-import type { DemoUser } from "@/src/features/room/types";
+import type { RoomPerspective } from "@/src/features/room/types";
 
 export type Settlement = {
   id: string;
-  from: DemoUser;
+  from: RoomPerspective;
   amount: number;
   date: string;
   note?: string;
-  createdBy: DemoUser;
+  createdBy: RoomPerspective;
   createdByUid?: string;
   fromUid?: string;
 };

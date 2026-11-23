@@ -24,13 +24,13 @@ RoomSplit is a roommate expense and settlement tracker. Preserve the existing pr
 - Never expose provider AI keys or Firebase Admin credentials to the browser.
 - Never store `process.env` secrets inside client components.
 - Prefer server route handlers or Server Actions for privileged operations.
-- Preserve INR formatting and the `you` / `friend` demo-user semantics.
+- Preserve INR formatting and the `you` / `friend` roommate-perspective labels.
 - Escape or otherwise safely render user-entered text.
 - Use existing Tailwind and neutral zinc visual conventions unless an implementation task changes the design.
 
 ## Required Behaviors
 
-- Support demo mode and Firebase live mode.
+- Require Firebase sign-in; do not provide demo mode or seed sample rooms or expenses.
 - Support room, monthly budget, and two-roommate profiles.
 - Support expense CRUD with split modes.
 - Restrict UI expense edits/deletes to the entry owner.
@@ -57,7 +57,7 @@ RoomSplit is a roommate expense and settlement tracker. Preserve the existing pr
 
 - Run the smallest relevant lint/type/test command after each implementation batch.
 - Run a production build before declaring the migration complete.
-- Verify demo mode in the browser.
+- Verify the login screen and empty create/join-room flow in the browser.
 - Verify Firebase authentication and Firestore only when credentials are available.
 - Never report Firebase live-mode success without an actual configured environment.
 

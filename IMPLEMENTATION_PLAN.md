@@ -3,8 +3,8 @@
 ## 1. Project Purpose
 
 RoomSplit is a two-roommate expense ledger and settlement tracker for shared-home costs.
-It is built around the existing demo users, **You (Rahul)** and **Friend (Aman)**, and the
-**Room 204 / RM204A** sample room.
+It is for authenticated roommates and must not preload the legacy **Room 204 / RM204A**
+sample room or its fictional users.
 
 The migrated application must preserve the existing product behavior while replacing the
 single `index.html` implementation with a maintainable Next.js App Router project suitable
@@ -12,10 +12,10 @@ for Vercel deployment.
 
 ## 2. Existing Application Behavior
 
-The current `index.html` provides:
+The legacy `index.html` prototype provides:
 
-- Demo and live Firebase modes.
-- Switching between `you` and `friend` demo users.
+- Demo and live Firebase modes (the migrated app intentionally removes the demo flow).
+- Switching between fictional `you` and `friend` demo users.
 - Room name, room code, monthly budget, and two roommate profiles.
 - Expense CRUD with title, amount, date, category, payer, split rule, and note.
 - Split rules:
@@ -37,8 +37,8 @@ The current `index.html` provides:
 - A room invite code, invite link, and join-room interaction.
 - An accessible-neutral zinc visual style with a sticky header and underline navigation.
 
-The INR sample state, categories, settlement semantics, and `you` / `friend` user names from
-`index.html` must remain the default demo experience.
+Preserve INR formatting, categories, settlement semantics, and `you` / `friend` perspective
+labels, but do not load the prototype's fictional names, room, expenses, or settlements.
 
 ## 3. Target Stack
 
@@ -78,13 +78,11 @@ src/
     expenses/
       types.ts
       calculations.ts
-      demo-repository.ts
       firestore-repository.ts
       use-expenses.ts
     settlements/
       types.ts
       calculations.ts
-      demo-repository.ts
       firestore-repository.ts
       use-settlements.ts
     room/
@@ -110,7 +108,7 @@ builders must not be mixed into page components.
 ### Room
 
 ```ts
-type DemoUser = "you" | "friend";
+type RoomPerspective = "you" | "friend";
 
 type RoomProfile = {
   code: string;
@@ -136,10 +134,10 @@ type Expense = {
   amount: number;
   date: string;
   category: ExpenseCategoryId;
-  paidBy: DemoUser;
+  paidBy: RoomPerspective;
   split: ExpenseSplit;
   note?: string;
-  createdBy: DemoUser;
+  createdBy: RoomPerspective;
   createdByUid?: string;
   updatedAt?: string;
 };
@@ -150,11 +148,11 @@ type Expense = {
 ```ts
 type Settlement = {
   id: string;
-  from: DemoUser;
+  from: RoomPerspective;
   amount: number;
   date: string;
   note?: string;
-  createdBy: DemoUser;
+  createdBy: RoomPerspective;
   createdByUid?: string;
 };
 ```
@@ -186,15 +184,13 @@ and the `< 1 INR` all-settled threshold.
 
 ## 7. State and Repository Strategy
 
-### Demo mode
+### Initial and live state
 
-- Default to demo mode.
-- Persist the existing `roomsplit_state_v2` state in localStorage for backward compatibility.
-- Seed the complete November 2026 sample state.
-- Switch active demo user through a React context or app store.
-- Keep an optional migration from older or malformed state shapes.
-- Hydrate localStorage after mount to avoid hydration mismatch in Next.js.
-- Provide demo mode even when Firebase credentials are absent.
+- Do not seed sample room, profile, expense, or settlement data.
+- Require Firebase Authentication before accessing room data.
+- New accounts without a room enter an empty create-or-join flow.
+- Do not read or persist the legacy `roomsplit_state_v2` demo state.
+- Keep expense and settlement state scoped to the signed-in user's room.
 
 ### Firebase live mode
 
@@ -216,7 +212,7 @@ Create the initial route at `src/app/page.tsx`.
 Use an application shell with:
 
 - Brand and room identity.
-- Demo/live mode badge.
+- Live status and signed-in profile controls.
 - Signed-in profile controls; do not allow switching identity to another roommate.
 - Invite and UPI action.
 - Firebase or authentication action.
@@ -260,12 +256,11 @@ do not interpolate it into `innerHTML`.
 - [ ] Add tests for `50-50`, `100-other`, personal, settlement, and all-time behavior.
 - [ ] Add tests for filtered CSV and fixed monthly bill data.
 
-### Phase 3: Demo State
+### Phase 3: Live Room State
 
-- [ ] Create a typed localStorage repository.
-- [ ] Seed and migrate `roomsplit_state_v2`.
-- [ ] Add app-level room, expense, settlement, and active-user state.
-- [ ] Preserve demo switching and active month filtering.
+- [ ] Create an empty, typed initial state with no sample records.
+- [ ] Load room, expense, and settlement data only for authenticated members.
+- [ ] Route new accounts with no room to the create-or-join flow.
 - [ ] Implement fixed monthly bill deduplication per month/category.
 
 ### Phase 4: Layout and Overview
@@ -290,7 +285,7 @@ do not interpolate it into `innerHTML`.
 - [ ] Build the settle-up modal.
 - [ ] Generate UPI deep links and QR codes.
 - [ ] Generate WhatsApp requests with a safely encoded phone and message.
-- [ ] Add and delete settlement records in demo and Firebase modes.
+- [ ] Add and delete settlement records in Firebase rooms.
 
 ### Phase 7: Room, Invite, and Profiles
 
@@ -324,7 +319,7 @@ do not interpolate it into `innerHTML`.
 - [ ] Add dialog and form accessibility coverage.
 - [ ] Add loading, empty, permission, and error feedback.
 - [ ] Run lint, type-check, tests, and a Next.js production build.
-- [ ] Smoke-test demo mode in a desktop and mobile browser.
+- [ ] Smoke-test the login and empty-room flows in desktop and mobile browsers.
 - [ ] Verify month filtering, balance calculations, CSV, QR, and UPI flows.
 - [ ] Configure Vercel environment variables.
 - [ ] Deploy and verify the production route.
@@ -380,7 +375,7 @@ deployed until membership, room joining, and invite handling are implemented and
 3. Use the normal Next.js build; do not configure a custom static export.
 4. Add public Firebase variables in Vercel for Preview and Production environments.
 5. Add server-only AI variables only if the AI route is implemented.
-6. Deploy a preview from a feature branch and verify demo mode.
+6. Deploy a preview from a feature branch and verify the login and empty-room flows.
 7. Promote to Production after smoke tests pass.
 8. Confirm authorized production domains in Firebase Authentication.
 9. Add those domains to Firestore/app configuration if Firebase live mode is enabled.
@@ -400,7 +395,7 @@ npm run build
 
 1. Scaffold and tooling.
 2. Types, calculations, CSV, UPI, and domain tests.
-3. Demo state, hydration, and application shell.
+3. Empty initial state, authentication, and application shell.
 4. Overview, budget, and charts.
 5. Ledger, fixed bills, and owner-only CRUD.
 6. Settlements, QR, UPI, and WhatsApp.
@@ -415,11 +410,11 @@ Complete each batch only after its focused lint/type/test/build validation passe
 ## 14. Acceptance Criteria
 
 - [ ] The app runs as a Next.js App Router project.
-- [ ] Demo mode requires no external credentials.
-- [ ] November 2026 sample data renders on first visit.
-- [ ] `you` / `friend` switching preserves all existing owner-only behavior.
+- [ ] No fictional room, profile, expense, or settlement data is preloaded.
+- [ ] A new authenticated user without a room sees an empty create-or-join flow.
+- [ ] `you` / `friend` perspective mapping preserves owner-only behavior.
 - [ ] Monthly and all-time balance calculations match the existing app.
-- [ ] Expense CRUD works in demo mode and live mode.
+- [ ] Expense CRUD is available only to authenticated room members.
 - [ ] Fixed monthly bills are deduplicated.
 - [ ] Filtered CSV export matches the ledger filter.
 - [ ] UPI links, QR codes, and WhatsApp links are correctly encoded.

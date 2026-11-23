@@ -1,4 +1,7 @@
-export type DemoUser = "you" | "friend";
+import type { Expense } from "@/src/features/expenses/types";
+import type { Settlement } from "@/src/features/settlements/types";
+
+export type RoomPerspective = "you" | "friend";
 
 export type RoomProfile = {
   code: string;
@@ -10,4 +13,10 @@ export type RoomProfile = {
   friendName: string;
   friendPhone: string;
   friendUpi: string;
+};
+
+export type RoomState = {
+  room: RoomProfile;
+  expenses: Expense[];
+  settlements: Settlement[];
 };
