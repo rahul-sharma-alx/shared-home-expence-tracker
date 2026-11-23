@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fafafa;
+  --foreground: #18181b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+html {
+  min-height: 100dvh;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-header {
+  padding-top: env(safe-area-inset-top);
+}
+
+.mobile-main {
+  padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+}
+
+.mobile-bottom-nav {
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+}
+
+@media (min-width: 768px) {
+  .mobile-main {
+    padding-bottom: 1.25rem;
+  }
+}

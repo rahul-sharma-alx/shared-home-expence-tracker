@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RoomSplit — Roommate Ledger</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Firebase Compat SDKs (Ready for your Firebase Credentials) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <style>
+    :root {
+      --bg-canvas: #F6F5F1;
+      --bg-surface: #FFFFFF;
+      --border-hairline: #E4E2DC;
+      --text-ink: #18181B;
+      --text-muted: #71717A;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg-canvas);
+      color: var(--text-ink);
+      -webkit-font-smoothing: antialiased;
+    }
+    .num {
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+    }
+    .surface {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-hairline);
+    }
+    .nav-tab {
+      position: relative;
+      padding: 0.75rem 0.25rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #71717A;
+      transition: color 0.15s ease;
+    }
+    .nav-tab:hover {
+      color: #18181B;
+    }
+    .nav-tab-active {
+      color: #18181B;
+      font-weight: 600;
+    }
+    .nav-tab-active::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -1px;
+      height: 2px;
+      background-color: #18181B;
+      border-radius: 2px 2px 0 0;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #F6F5F1; }
+    ::-webkit-scrollbar-thumb { background: #D4D4D8; border-radius: 9999px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Top Header + Underline Navigation -->
+  <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-[#E4E2DC]">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <!-- Row 1: Brand, Room Pill & Primary Actions -->
+      <div class="py-3.5 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-[#18181B] text-white flex items-center justify-center font-bold text-sm tracking-tight">
+            RS
+          </div>
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <h1 class="text-base font-semibold tracking-tight text-zinc-900">RoomSplit</h1>
+            <span class="text-zinc-300">/</span>
+            <button onclick="openInviteModal()" class="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-zinc-900 bg-[#F6F5F1] px-2.5 py-1 rounded-md border border-[#E4E2DC] transition">
+              <span id="roomSubtitle">Room 204 · RM204A</span>
+            </button>
+            <span id="modeBadge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200/70">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              Demo
+            </span>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Active User Switcher -->
+          <div id="demoUserSwitcher" class="flex items-center bg-[#F6F5F1] border border-[#E4E2DC] rounded-lg p-0.5 text-xs">
+            <button id="switchUserYou" onclick="switchDemoUser('you')" class="px-2.5 py-1 rounded-md font-medium transition bg-white text-zinc-900 shadow-sm">
+              You (Rahul)
+            </button>
+            <button id="switchUserFriend" onclick="switchDemoUser('friend')" class="px-2.5 py-1 rounded-md font-medium transition text-zinc-500 hover:text-zinc-900">
+              Friend (Aman)
+            </button>
+          </div>
+
+          <button onclick="openInviteModal()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#E4E2DC] bg-white text-zinc-700 hover:bg-zinc-50 transition">
+            <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+            <span class="hidden sm:inline">Invite &amp; UPI</span>
+          </button>
+
+          <button onclick="openFirebaseModal()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#E4E2DC] bg-white text-zinc-700 hover:bg-zinc-50 transition">
+            <i data-lucide="database" class="w-3.5 h-3.5 text-amber-600"></i>
+            <span class="hidden sm:inline">Firebase</span>
+          </button>
+
+          <button onclick="openExpenseModal()" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-[#18181B] text-white hover:bg-zinc-800 transition">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Add Expense</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Row 2: Clean Underline Tabs & Period Filter -->
+      <div class="flex items-center justify-between gap-4 border-t border-[#F0EFEA]">
+        <nav class="flex items-center gap-6 overflow-x-auto">
+          <button id="tabDashboard" onclick="switchTab('dashboard')" class="nav-tab nav-tab-active whitespace-nowrap">
+            Overview
+          </button>
+          <button id="tabExpenses" onclick="switchTab('expenses')" class="nav-tab whitespace-nowrap">
+            Ledger
+          </button>
+          <button id="tabSettlements" onclick="switchTab('settlements')" class="nav-tab whitespace-nowrap">
+            Settlements &amp; UPI
+          </button>
+          <button id="tabArchitecture" onclick="switchTab('architecture')" class="nav-tab whitespace-nowrap">
+            Security &amp; Plan
+          </button>
+        </nav>
+
+        <div class="flex items-center gap-2 py-2 shrink-0">
+          <select id="monthFilter" onchange="onFilterChange()" class="bg-transparent text-xs font-medium text-zinc-600 hover:text-zinc-900 focus:outline-none cursor-pointer">
+            <option value="2026-11">Nov 2026</option>
+            <option value="2026-10">Oct 2026</option>
+            <option value="all">All Time</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- ASYMMETRIC HERO LEDGER SUMMARY -->
+    <section id="kpiSection" class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <!-- Left: Net Balance & Split Breakdown (7 cols) -->
+      <div class="lg:col-span-7 surface rounded-xl p-5 flex flex-col justify-between gap-5">
+        <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div>
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Net Settlement Balance</span>
+            <div class="mt-1 flex items-baseline gap-2.5">
+              <span id="kpiBalanceAmount" class="text-3xl sm:text-4xl font-bold text-zinc-900 num">₹0</span>
+              <span id="kpiBalanceText" class="text-sm font-medium text-teal-700">All settled up</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="sendWhatsAppUpiRequest()" class="px-3 py-1.5 rounded-lg border border-[#E4E2DC] bg-white text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition inline-flex items-center gap-1.5">
+              <i data-lucide="send" class="w-3.5 h-3.5"></i>
+              Request
+            </button>
+            <button onclick="openSettleModal()" class="px-3.5 py-1.5 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 transition inline-flex items-center gap-1.5">
+              <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+              Settle via UPI
+            </button>
+          </div>
+        </div>
+
+        <!-- Paid Comparison Strip -->
+        <div class="pt-4 border-t border-[#F0EFEA] grid grid-cols-2 gap-4">
+          <div>
+            <div class="flex items-center justify-between text-xs text-zinc-500">
+              <span id="kpiYouLabel">Rahul paid</span>
+              <span id="kpiYouShare" class="text-zinc-400 num">Share ₹0</span>
+            </div>
+            <div id="kpiYouPaid" class="mt-1 text-lg font-semibold text-zinc-900 num">₹0</div>
+          </div>
+          <div class="pl-4 border-l border-[#F0EFEA]">
+            <div class="flex items-center justify-between text-xs text-zinc-500">
+              <span id="kpiFriendLabel">Aman paid</span>
+              <span id="kpiFriendShare" class="text-zinc-400 num">Share ₹0</span>
+            </div>
+            <div id="kpiFriendPaid" class="mt-1 text-lg font-semibold text-zinc-900 num">₹0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Total Room Spend & Budget Meter (5 cols) -->
+      <div class="lg:col-span-5 surface rounded-xl p-5 flex flex-col justify-between gap-4">
+        <div class="flex items-start justify-between">
+          <div>
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Total Room Spend</span>
+            <div id="kpiTotal" class="mt-1 text-3xl font-bold text-zinc-900 num">₹0</div>
+            <p id="kpiCount" class="mt-0.5 text-xs text-zinc-500">0 entries recorded</p>
+          </div>
+          <button onclick="openInviteModal()" class="text-xs font-medium text-zinc-500 hover:text-zinc-900 underline underline-offset-2">
+            Edit Cap
+          </button>
+        </div>
+
+        <div class="pt-3 border-t border-[#F0EFEA] space-y-2">
+          <div class="flex items-center justify-between text-xs">
+            <span id="budgetSummaryText" class="font-medium text-zinc-600 num">₹0 of ₹18,000 cap</span>
+            <span id="budgetAlertBadge" class="hidden px-2 py-0.5 rounded text-[11px] font-semibold"></span>
+          </div>
+          <div class="w-full h-2 bg-[#F0EFEA] rounded-full overflow-hidden">
+            <div id="budgetProgressBar" class="h-full rounded-full bg-zinc-900 transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 1: OVERVIEW -->
+    <div id="viewDashboard" class="space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Recent Ledger Feed (7 cols) -->
+        <div class="lg:col-span-7 surface rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-zinc-900">Recent Entries</h2>
+            <button onclick="switchTab('expenses')" class="text-xs font-medium text-zinc-500 hover:text-zinc-900">
+              Full ledger →
+            </button>
+          </div>
+          <div id="recentExpensesList" class="divide-y divide-[#F0EFEA]"></div>
+        </div>
+
+        <!-- Category Totals Breakdown (5 cols) -->
+        <div class="lg:col-span-5 surface rounded-xl p-5">
+          <h2 class="text-sm font-semibold text-zinc-900 mb-4">Category Breakdown</h2>
+          <div id="categoryTotalsList" class="space-y-3.5"></div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="surface rounded-xl p-5">
+          <div class="mb-4">
+            <h2 class="text-sm font-semibold text-zinc-900">Spend Distribution</h2>
+            <p class="text-xs text-zinc-500">Share across rent, bills, vegetables &amp; groceries</p>
+          </div>
+          <div class="relative h-64">
+            <canvas id="categoryChart"></canvas>
+          </div>
+        </div>
+
+        <div class="surface rounded-xl p-5">
+          <div class="mb-4">
+            <h2 class="text-sm font-semibold text-zinc-900">Paid by Roommate</h2>
+            <p class="text-xs text-zinc-500">Out-of-pocket comparison per category</p>
+          </div>
+          <div class="relative h-64">
+            <canvas id="payerChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 2: FULL LEDGER -->
+    <div id="viewExpenses" class="hidden space-y-4">
+      <div class="surface rounded-xl p-3.5 flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input id="searchInput" type="text" oninput="renderExpensesTable()" placeholder="Filter by item, note, or vendor..." class="w-full pl-9 pr-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900" />
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <select id="categoryFilter" onchange="renderExpensesTable()" class="bg-white border border-[#E4E2DC] rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-700 focus:outline-none">
+            <option value="all">All Categories</option>
+          </select>
+          <select id="payerFilter" onchange="renderExpensesTable()" class="bg-white border border-[#E4E2DC] rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-700 focus:outline-none">
+            <option value="all">Paid by Anyone</option>
+            <option value="you">Paid by You</option>
+            <option value="friend">Paid by Friend</option>
+          </select>
+          <button onclick="addRecurringTemplate()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#E4E2DC] bg-[#F6F5F1] text-zinc-700 hover:bg-zinc-200/70 transition">
+            <i data-lucide="repeat" class="w-3.5 h-3.5"></i>
+            Add Fixed Bills
+          </button>
+          <button onclick="exportExpensesCSV()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#E4E2DC] bg-white text-zinc-700 hover:bg-zinc-50 transition">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="surface rounded-xl overflow-hidden">
+        <div class="px-4 py-2 bg-[#FAF9F6] border-b border-[#E4E2DC] flex items-center justify-between text-xs text-zinc-500">
+          <span class="inline-flex items-center gap-1.5">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5 text-teal-700"></i>
+            Owner-only edits: <strong id="activeActorLabel" class="text-zinc-800">Rahul</strong> can edit or delete only their own entries.
+          </span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="border-b border-[#E4E2DC] text-[11px] font-semibold text-zinc-500 uppercase tracking-wider bg-[#FAF9F6]">
+                <th class="py-2.5 px-4">Date</th>
+                <th class="py-2.5 px-4">Description</th>
+                <th class="py-2.5 px-4">Paid By</th>
+                <th class="py-2.5 px-4">Split</th>
+                <th class="py-2.5 px-4 text-right">Amount</th>
+                <th class="py-2.5 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="expensesTableBody" class="divide-y divide-[#F0EFEA] text-sm"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 3: SETTLEMENTS & UPI -->
+    <div id="viewSettlements" class="hidden space-y-6">
+      <div class="surface rounded-xl p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-base font-semibold text-zinc-900">Settlement &amp; UPI Request</h2>
+          <p id="settlementBannerText" class="text-sm text-zinc-600 mt-0.5">Calculating balances...</p>
+          <p id="settlementUpiHint" class="text-xs text-zinc-500 font-mono mt-1"></p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="sendWhatsAppUpiRequest()" class="px-3.5 py-2 rounded-lg border border-[#E4E2DC] bg-white text-zinc-800 text-xs font-semibold hover:bg-zinc-50 transition inline-flex items-center gap-1.5">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            Send UPI Request
+          </button>
+          <button onclick="openSettleModal()" class="px-4 py-2 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 transition inline-flex items-center gap-1.5">
+            <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+            Pay / Record Settlement
+          </button>
+        </div>
+      </div>
+
+      <div class="surface rounded-xl p-5">
+        <h3 class="text-sm font-semibold text-zinc-900 mb-3">Settlement History</h3>
+        <div id="settlementHistoryList" class="divide-y divide-[#F0EFEA]"></div>
+      </div>
+    </div>
+
+    <!-- VIEW 4: SECURITY & ARCHITECTURE PLAN -->
+    <div id="viewArchitecture" class="hidden space-y-6">
+      <div class="surface rounded-xl p-6 space-y-5">
+        <div>
+          <h2 class="text-lg font-semibold text-zinc-900">Architecture, Ownership Security &amp; Firebase Rules</h2>
+          <p class="text-sm text-zinc-600 mt-1">Modular browser client with local Demo Mode and real-time Firebase Auth + Firestore synchronization.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="p-4 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC]">
+            <h3 class="font-semibold text-zinc-900 text-sm">1. Owner-Only Modification</h3>
+            <p class="text-xs text-zinc-600 mt-1">Every entry stores `createdBy` and `createdByUid`. UI actions and Firestore rules block modifying another roommate's entries.</p>
+          </div>
+          <div class="p-4 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC]">
+            <h3 class="font-semibold text-zinc-900 text-sm">2. UPI Deep Link &amp; QR</h3>
+            <p class="text-xs text-zinc-600 mt-1">Generates `upi://pay` links, scannable QR codes, and WhatsApp payment requests from saved phone numbers and UPI IDs.</p>
+          </div>
+          <div class="p-4 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC]">
+            <h3 class="font-semibold text-zinc-900 text-sm">3. Recurring Bills &amp; CSV</h3>
+            <p class="text-xs text-zinc-600 mt-1">1-click fixed monthly bills (Rent, Wi-Fi, Water) and instant CSV export for monthly record-keeping.</p>
+          </div>
+          <div class="p-4 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC]">
+            <h3 class="font-semibold text-zinc-900 text-sm">4. Monthly Budget Cap</h3>
+            <p class="text-xs text-zinc-600 mt-1">Tracks room spending against your monthly limit with visual alerts at 80% and 100%.</p>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-lg bg-zinc-900 text-zinc-100 text-xs overflow-x-auto">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-semibold text-amber-400">Firestore Security Rules (Owner-Only Update/Delete)</span>
+            <button onclick="copyRules()" class="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-white text-xs">Copy Rules</button>
+          </div>
+          <pre id="firestoreRulesCode" class="leading-relaxed">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{roomId} {
+      allow read, write: if request.auth != null;
+      match /expenses/{expenseId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+          && request.resource.data.createdByUid == request.auth.uid;
+        allow update, delete: if request.auth != null
+          && resource.data.createdByUid == request.auth.uid;
+      }
+      match /settlements/{settlementId} {
+        allow read, create: if request.auth != null;
+        allow delete: if request.auth != null
+          && resource.data.createdByUid == request.auth.uid;
+      }
+    }
+  }
+}</pre>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- MODAL 1: ADD / EDIT EXPENSE -->
+  <div id="expenseModal" class="hidden fixed inset-0 z-50 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl border border-[#E4E2DC] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h3 id="expenseModalTitle" class="text-base font-semibold text-zinc-900">Add Daily Expense</h3>
+        <button onclick="closeModal('expenseModal')" class="p-1 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <form id="expenseForm" onsubmit="saveExpense(event)" class="space-y-3.5">
+        <input type="hidden" id="expId" />
+
+        <div>
+          <label class="block text-xs font-medium text-zinc-700 mb-1">Description</label>
+          <input id="expTitle" type="text" required placeholder="e.g. Monthly Room Rent, Tomatoes &amp; Onions" class="w-full px-3 py-2 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-zinc-700 mb-1">Amount (₹)</label>
+            <input id="expAmount" type="number" step="0.01" min="1" required placeholder="500" class="w-full px-3 py-2 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900 num" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-zinc-700 mb-1">Date</label>
+            <input id="expDate" type="date" required class="w-full px-3 py-2 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-zinc-700 mb-1">Category</label>
+          <select id="expCategory" class="w-full px-3 py-2 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900"></select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-zinc-700 mb-1">Paid By</label>
+            <select id="expPaidBy" class="w-full px-3 py-2 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900">
+              <option value="you">You</option>
+              <option value="friend">Friend</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-zinc-700 mb-1">Split Rule</label>
+            <select id="expSplit" class="w-full px-3 py-2 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900">
+              <option value="50-50">50/50 Split</option>
+              <option value="100-other">100% Owed by Other</option>
+              <option value="personal">Personal (No Split)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-zinc-700 mb-1">Notes (optional)</label>
+          <input id="expNote" type="text" placeholder="e.g. Paid via UPI, meter reading 4120" class="w-full px-3 py-2 text-sm border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900" />
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" onclick="closeModal('expenseModal')" class="px-4 py-2 rounded-lg text-xs font-medium text-zinc-600 hover:bg-zinc-100">Cancel</button>
+          <button type="submit" class="px-5 py-2 rounded-lg text-xs font-semibold bg-[#18181B] text-white hover:bg-zinc-800">Save Entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: INVITE FRIEND, ROOM & UPI SETTINGS -->
+  <div id="inviteModal" class="hidden fixed inset-0 z-50 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl border border-[#E4E2DC] max-w-lg w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h3 class="text-base font-semibold text-zinc-900">Room, Invite &amp; UPI Profiles</h3>
+        <button onclick="closeModal('inviteModal')" class="p-1 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="p-4 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC] text-center space-y-2">
+        <p class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Room Invite Code</p>
+        <div id="inviteCodeDisplay" class="text-2xl font-bold tracking-widest text-zinc-900 font-mono">RM204A</div>
+        <p class="text-xs text-zinc-500">Share this code with your roommate so they can join and log expenses.</p>
+        <div class="flex justify-center gap-2 pt-1">
+          <button onclick="copyInviteCode()" class="px-3 py-1.5 rounded-lg bg-[#18181B] text-white text-xs font-semibold hover:bg-zinc-800">Copy Code</button>
+          <button onclick="copyInviteLink()" class="px-3 py-1.5 rounded-lg bg-white text-zinc-700 border border-[#E4E2DC] text-xs font-semibold hover:bg-zinc-50">Copy Invite Link</button>
+        </div>
+      </div>
+
+      <div class="space-y-3 pt-2 border-t border-[#F0EFEA]">
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-xs font-medium text-zinc-600 mb-1">Room Name</label>
+            <input id="roomNameInput" type="text" class="w-full px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-zinc-600 mb-1">Monthly Budget Cap (₹)</label>
+            <input id="roomBudgetInput" type="number" min="1000" step="500" class="w-full px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg num" />
+          </div>
+        </div>
+
+        <div class="p-3 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC] space-y-2">
+          <p class="text-xs font-semibold text-zinc-800">Your Profile</p>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input id="yourNameInput" type="text" placeholder="Your Name" class="px-2.5 py-1.5 text-xs border border-[#E4E2DC] rounded-md bg-white" />
+            <input id="yourPhoneInput" type="tel" placeholder="Phone (10 digits)" class="px-2.5 py-1.5 text-xs border border-[#E4E2DC] rounded-md bg-white" />
+            <input id="yourUpiInput" type="text" placeholder="UPI ID (name@okicici)" class="px-2.5 py-1.5 text-xs border border-[#E4E2DC] rounded-md bg-white font-mono" />
+          </div>
+        </div>
+
+        <div class="p-3 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC] space-y-2">
+          <p class="text-xs font-semibold text-zinc-800">Roommate's Profile</p>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input id="friendNameInput" type="text" placeholder="Friend's Name" class="px-2.5 py-1.5 text-xs border border-[#E4E2DC] rounded-md bg-white" />
+            <input id="friendPhoneInput" type="tel" placeholder="Phone (10 digits)" class="px-2.5 py-1.5 text-xs border border-[#E4E2DC] rounded-md bg-white" />
+            <input id="friendUpiInput" type="text" placeholder="UPI ID (friend@ybl)" class="px-2.5 py-1.5 text-xs border border-[#E4E2DC] rounded-md bg-white font-mono" />
+          </div>
+        </div>
+
+        <button onclick="saveRoomSettings()" class="w-full py-2 rounded-lg bg-[#18181B] text-white text-xs font-semibold hover:bg-zinc-800">Save Room &amp; UPI Details</button>
+      </div>
+
+      <div class="space-y-2 pt-2 border-t border-[#F0EFEA]">
+        <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Join Another Room</h4>
+        <div class="flex gap-2">
+          <input id="joinCodeInput" type="text" placeholder="Enter 6-char code" class="flex-1 px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg uppercase font-mono" />
+          <button onclick="joinRoomByCode()" class="px-4 py-1.5 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800">Join</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: SETTLE UP & UPI PAYMENT -->
+  <div id="settleModal" class="hidden fixed inset-0 z-50 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl border border-[#E4E2DC] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h3 class="text-base font-semibold text-zinc-900">Settle Up via UPI</h3>
+        <button onclick="closeModal('settleModal')" class="p-1 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="p-4 rounded-lg bg-[#FAF9F6] border border-[#E4E2DC] flex flex-col items-center text-center space-y-2.5">
+        <div id="upiQrContainer" class="bg-white p-2.5 rounded-lg border border-[#E4E2DC]"></div>
+        <div class="space-y-0.5">
+          <p id="upiPayeeLabel" class="text-xs font-semibold text-zinc-800"></p>
+          <p id="upiIdLabel" class="text-xs font-mono text-teal-700"></p>
+        </div>
+        <div class="flex flex-wrap justify-center gap-2 pt-1 w-full">
+          <a id="upiDeepLinkBtn" href="#" class="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#18181B] text-white text-xs font-semibold hover:bg-zinc-800 transition">
+            <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+            Open UPI App
+          </a>
+          <button type="button" onclick="sendWhatsAppUpiRequest()" class="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 transition">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            Send Request
+          </button>
+        </div>
+      </div>
+
+      <form onsubmit="saveSettlement(event)" class="space-y-3 pt-2 border-t border-[#F0EFEA]">
+        <p class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Record Completed Payment</p>
+        <div>
+          <label class="block text-xs font-medium text-zinc-700 mb-1">Who Paid?</label>
+          <select id="settleFrom" onchange="refreshUpiQr()" class="w-full px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg">
+            <option value="friend">Friend paid You</option>
+            <option value="you">You paid Friend</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-zinc-700 mb-1">Amount (₹)</label>
+          <input id="settleAmount" type="number" step="0.01" min="1" oninput="refreshUpiQr()" required class="w-full px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg num" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-zinc-700 mb-1">Payment Method / Note</label>
+          <input id="settleNote" type="text" placeholder="e.g. GPay / PhonePe / Cash" class="w-full px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg" />
+        </div>
+        <button type="submit" class="w-full py-2 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800">Mark as Settled</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 4: FIREBASE CREDENTIALS & AUTH -->
+  <div id="firebaseModal" class="hidden fixed inset-0 z-50 bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl border border-[#E4E2DC] max-w-lg w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="flame" class="w-4 h-4 text-amber-600"></i>
+          <h3 class="text-base font-semibold text-zinc-900">Firebase DB &amp; Auth Setup</h3>
+        </div>
+        <button onclick="closeModal('firebaseModal')" class="p-1 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-zinc-600 leading-relaxed">
+        Paste your Firebase Web App config JSON below (from Firebase Console → Project Settings → Your Apps) to enable Email/Password login and live Firestore sync.
+      </p>
+
+      <div>
+        <label class="block text-xs font-medium text-zinc-700 mb-1">Firebase Config JSON</label>
+        <textarea id="firebaseConfigInput" rows="6" placeholder='{
+  "apiKey": "AIzaSy...",
+  "authDomain": "your-app.firebaseapp.com",
+  "projectId": "your-app",
+  "storageBucket": "your-app.appspot.com",
+  "messagingSenderId": "123456789",
+  "appId": "1:123456789:web:abcdef"
+}' class="w-full px-3 py-2 text-xs font-mono border border-[#E4E2DC] rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-900"></textarea>
+      </div>
+
+      <div class="flex items-center justify-between gap-2">
+        <button onclick="connectFirebaseFromModal()" class="flex-1 py-2 rounded-lg bg-[#18181B] text-white text-xs font-semibold hover:bg-zinc-800 transition">
+          Connect Firebase
+        </button>
+        <button onclick="disconnectFirebase()" class="px-4 py-2 rounded-lg border border-[#E4E2DC] text-xs font-medium text-zinc-600 hover:bg-zinc-50">
+          Use Demo Mode
+        </button>
+      </div>
+
+      <div id="firebaseAuthPanel" class="hidden pt-4 border-t border-[#F0EFEA] space-y-3">
+        <div id="authSignedOutView" class="space-y-2.5">
+          <h4 class="text-xs font-semibold text-zinc-700 uppercase tracking-wider">Sign In / Create Account</h4>
+          <input id="authEmail" type="email" placeholder="Email address" class="w-full px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg" />
+          <input id="authPassword" type="password" placeholder="Password (min 6 chars)" class="w-full px-3 py-1.5 text-sm border border-[#E4E2DC] rounded-lg" />
+          <div class="flex gap-2">
+            <button onclick="firebaseSignIn()" class="flex-1 py-2 rounded-lg bg-[#18181B] text-white text-xs font-semibold hover:bg-zinc-800">Sign In</button>
+            <button onclick="firebaseSignUp()" class="flex-1 py-2 rounded-lg border border-[#E4E2DC] bg-white text-zinc-800 text-xs font-semibold hover:bg-zinc-50">Sign Up</button>
+          </div>
+        </div>
+        <div id="authSignedInView" class="hidden flex items-center justify-between p-3 rounded-lg bg-teal-50 border border-teal-200">
+          <div>
+            <p class="text-xs font-semibold text-teal-800">Connected &amp; Signed In</p>
+            <p id="authUserEmail" class="text-xs text-teal-700"></p>
+          </div>
+          <button onclick="firebaseSignOut()" class="px-3 py-1 rounded-md bg-white text-teal-700 border border-teal-200 text-xs font-semibold">Sign Out</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="hidden fixed bottom-5 right-5 z-50 bg-[#18181B] text-white px-4 py-2.5 rounded-lg shadow-lg text-xs font-medium flex items-center gap-2">
+    <span id="toastText">Saved</span>
+  </div>
+
+  <script>
+    const DEFAULT_FIREBASE_CONFIG = null;
+
+    const CATEGORIES = [
+      { id: 'rent', name: 'Room Rent', color: '#18181B', icon: 'home' },
+      { id: 'electricity', name: 'Electricity Bill', color: '#D97706', icon: 'zap' },
+      { id: 'water', name: 'Water Bill', color: '#0284C7', icon: 'droplets' },
+      { id: 'vegetables', name: 'Vegetables', color: '#0F766E', icon: 'carrot' },
+      { id: 'groceries', name: 'Groceries', color: '#4F46E5', icon: 'shopping-basket' },
+      { id: 'internet', name: 'Wi-Fi / Internet', color: '#9333EA', icon: 'wifi' },
+      { id: 'gas', name: 'Gas / Cylinder', color: '#C2410C', icon: 'flame' },
+      { id: 'other', name: 'Other', color: '#71717A', icon: 'package' }
+    ];
+
+    const SAMPLE_STATE = {
+      room: {
+        code: 'RM204A',
+        name: 'Room 204',
+        budgetCap: 18000,
+        youName: 'Rahul',
+        youPhone: '9876543210',
+        youUpi: 'rahul@okaxis',
+        friendName: 'Aman',
+        friendPhone: '9811223344',
+        friendUpi: 'aman@ybl'
+      },
+      activeDemoUser: 'you',
+      expenses: [
+        { id: 'e1', title: 'Monthly Room Rent (Nov)', amount: 9000, category: 'rent', paidBy: 'you', createdBy: 'you', split: '50-50', date: '2026-11-01', note: 'Transferred to landlord' },
+        { id: 'e2', title: 'Electricity Bill (BSES)', amount: 1480, category: 'electricity', paidBy: 'friend', createdBy: 'friend', split: '50-50', date: '2026-11-04', note: 'Meter reading 4120' },
+        { id: 'e3', title: 'Water Can & Supply Bill', amount: 360, category: 'water', paidBy: 'you', createdBy: 'you', split: '50-50', date: '2026-11-06', note: '6 RO jars + monthly water' },
+        { id: 'e4', title: 'Sabzi Mandi Vegetables', amount: 420, category: 'vegetables', paidBy: 'friend', createdBy: 'friend', split: '50-50', date: '2026-11-09', note: 'Potatoes, onions, tomatoes, palak' },
+        { id: 'e5', title: 'Atta, Dal, Rice & Cooking Oil', amount: 1640, category: 'groceries', paidBy: 'you', createdBy: 'you', split: '50-50', date: '2026-11-12', note: 'DMart monthly ration' },
+        { id: 'e6', title: 'Airtel Xstream Fiber Wi-Fi', amount: 799, category: 'internet', paidBy: 'friend', createdBy: 'friend', split: '50-50', date: '2026-11-15', note: 'Monthly plan' },
+        { id: 'e7', title: 'Milk, Bread, Eggs & Curd', amount: 310, category: 'groceries', paidBy: 'friend', createdBy: 'friend', split: '50-50', date: '2026-11-18', note: 'Morning dairy run' },
+        { id: 'e8', title: 'Fresh Vegetables & Coriander', amount: 250, category: 'vegetables', paidBy: 'you', createdBy: 'you', split: '50-50', date: '2026-11-20', note: 'Evening market' }
+      ],
+      settlements: [
+        { id: 's1', from: 'friend', amount: 2500, date: '2026-11-05', note: 'GPay partial rent share', createdBy: 'friend' }
+      ]
+    };
+
+    let state = loadLocalState();
+    let currentTab = 'dashboard';
+    let categoryChartInstance = null;
+    let payerChartInstance = null;
+
+    let fbApp = null, fbAuth = null, fbDb = null, fbUser = null;
+    let unsubExpenses = null, unsubSettlements = null;
+
+    function loadLocalState() {
+      try {
+        const raw = localStorage.getItem('roomsplit_state_v2');
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+      return JSON.parse(JSON.stringify(SAMPLE_STATE));
+    }
+
+    function saveLocalState() {
+      try { localStorage.setItem('roomsplit_state_v2', JSON.stringify(state)); } catch (e) {}
+    }
+
+    function formatINR(num) {
+      const val = Number(num) || 0;
+      return '₹' + val.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    }
+
+    function getCategory(id) {
+      return CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length - 1];
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      document.getElementById('toastText').textContent = msg;
+      el.classList.remove('hidden');
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => el.classList.add('hidden'), 2800);
+    }
+
+    function canModifyEntry(entry) {
+      if (fbUser) return !entry.createdByUid || entry.createdByUid === fbUser.uid;
+      return (entry.createdBy || entry.paidBy) === state.activeDemoUser;
+    }
+
+    function getFilteredExpenses() {
+      const month = document.getElementById('monthFilter').value;
+      return state.expenses.filter(e => {
+        if (month === 'all') return true;
+        return (e.date || '').startsWith(month);
+      }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    }
+
+    function computeBalances(expensesList, settlementsList) {
+      let totalSpent = 0, youPaid = 0, friendPaid = 0, youShare = 0, friendShare = 0, net = 0;
+
+      expensesList.forEach(exp => {
+        const amt = Number(exp.amount) || 0;
+        totalSpent += amt;
+        if (exp.paidBy === 'you') youPaid += amt;
+        else friendPaid += amt;
+
+        if (exp.split === '50-50') {
+          youShare += amt / 2;
+          friendShare += amt / 2;
+          net += (exp.paidBy === 'you' ? amt / 2 : -amt / 2);
+        } else if (exp.split === '100-other') {
+          if (exp.paidBy === 'you') { friendShare += amt; net += amt; }
+          else { youShare += amt; net -= amt; }
+        } else {
+          if (exp.paidBy === 'you') youShare += amt;
+          else friendShare += amt;
+        }
+      });
+
+      const month = document.getElementById('monthFilter').value;
+      settlementsList.forEach(s => {
+        if (month !== 'all' && !(s.date || '').startsWith(month)) return;
+        const amt = Number(s.amount) || 0;
+        if (s.from === 'friend') net -= amt;
+        else net += amt;
+      });
+
+      return { totalSpent, youPaid, friendPaid, youShare, friendShare, net };
+    }
+
+    function renderAll() {
+      const youName = state.room.youName || 'You';
+      const friendName = state.room.friendName || 'Friend';
+
+      document.getElementById('roomSubtitle').textContent = `${state.room.name} · ${state.room.code}`;
+      document.getElementById('switchUserYou').textContent = `You (${youName})`;
+      document.getElementById('switchUserFriend').textContent = `Friend (${friendName})`;
+      document.getElementById('kpiYouLabel').textContent = `${youName} paid`;
+      document.getElementById('kpiFriendLabel').textContent = `${friendName} paid`;
+      document.getElementById('activeActorLabel').textContent = state.activeDemoUser === 'you' ? youName : friendName;
+
+      if (state.activeDemoUser === 'you') {
+        document.getElementById('switchUserYou').className = 'px-2.5 py-1 rounded-md font-medium transition bg-white text-zinc-900 shadow-sm';
+        document.getElementById('switchUserFriend').className = 'px-2.5 py-1 rounded-md font-medium transition text-zinc-500 hover:text-zinc-900';
+      } else {
+        document.getElementById('switchUserFriend').className = 'px-2.5 py-1 rounded-md font-medium transition bg-white text-zinc-900 shadow-sm';
+        document.getElementById('switchUserYou').className = 'px-2.5 py-1 rounded-md font-medium transition text-zinc-500 hover:text-zinc-900';
+      }
+
+      const expenses = getFilteredExpenses();
+      const bal = computeBalances(expenses, state.settlements);
+
+      document.getElementById('kpiTotal').textContent = formatINR(bal.totalSpent);
+      document.getElementById('kpiCount').textContent = `${expenses.length} entr${expenses.length === 1 ? 'y' : 'ies'} recorded`;
+      document.getElementById('kpiYouPaid').textContent = formatINR(bal.youPaid);
+      document.getElementById('kpiYouShare').textContent = `Share ${formatINR(bal.youShare)}`;
+      document.getElementById('kpiFriendPaid').textContent = formatINR(bal.friendPaid);
+      document.getElementById('kpiFriendShare').textContent = `Share ${formatINR(bal.friendShare)}`;
+
+      const cap = Number(state.room.budgetCap) || 18000;
+      const pct = Math.min(100, Math.round((bal.totalSpent / cap) * 100));
+      const bar = document.getElementById('budgetProgressBar');
+      const badge = document.getElementById('budgetAlertBadge');
+      document.getElementById('budgetSummaryText').textContent = `${formatINR(bal.totalSpent)} of ${formatINR(cap)} cap (${pct}%)`;
+      bar.style.width = `${pct}%`;
+      if (pct >= 100) {
+        bar.className = 'h-full rounded-full bg-rose-600 transition-all duration-300';
+        badge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200';
+        badge.textContent = 'Over Cap';
+      } else if (pct >= 80) {
+        bar.className = 'h-full rounded-full bg-amber-600 transition-all duration-300';
+        badge.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200';
+        badge.textContent = 'Nearing Cap';
+      } else {
+        bar.className = 'h-full rounded-full bg-zinc-900 transition-all duration-300';
+        badge.className = 'hidden';
+      }
+
+      const absNet = Math.abs(bal.net);
+      const balTextEl = document.getElementById('kpiBalanceText');
+      if (absNet < 1) {
+        document.getElementById('kpiBalanceAmount').textContent = '₹0';
+        balTextEl.textContent = 'All settled up';
+        balTextEl.className = 'text-sm font-medium text-teal-700';
+        document.getElementById('settlementBannerText').textContent = 'You and your roommate are completely settled up for this period.';
+        document.getElementById('settlementUpiHint').textContent = '';
+      } else if (bal.net > 0) {
+        document.getElementById('kpiBalanceAmount').textContent = formatINR(absNet);
+        balTextEl.textContent = `${friendName} owes ${youName}`;
+        balTextEl.className = 'text-sm font-medium text-teal-700';
+        document.getElementById('settlementBannerText').textContent = `${friendName} owes ${youName} ${formatINR(absNet)}.`;
+        document.getElementById('settlementUpiHint').textContent = `Payee UPI: ${state.room.youUpi || 'Not set'} · Phone: ${state.room.youPhone || 'Not set'}`;
+      } else {
+        document.getElementById('kpiBalanceAmount').textContent = formatINR(absNet);
+        balTextEl.textContent = `${youName} owes ${friendName}`;
+        balTextEl.className = 'text-sm font-medium text-amber-700';
+        document.getElementById('settlementBannerText').textContent = `${youName} owes ${friendName} ${formatINR(absNet)}.`;
+        document.getElementById('settlementUpiHint').textContent = `Payee UPI: ${state.room.friendUpi || 'Not set'} · Phone: ${state.room.friendPhone || 'Not set'}`;
+      }
+
+      renderRecentExpenses(expenses);
+      renderCategoryTotals(expenses);
+      renderExpensesTable();
+      renderSettlements();
+      renderCharts(expenses);
+      if (window.lucide) lucide.createIcons();
+    }
+
+    function renderRecentExpenses(expenses) {
+      const container = document.getElementById('recentExpensesList');
+      const items = expenses.slice(0, 6);
+      if (!items.length) {
+        container.innerHTML = `<p class="text-sm text-zinc-400 py-8 text-center">No entries for this period yet.</p>`;
+        return;
+      }
+      container.innerHTML = items.map(e => {
+        const cat = getCategory(e.category);
+        const payer = e.paidBy === 'you' ? state.room.youName : state.room.friendName;
+        return `
+          <div class="py-3 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-8 h-8 rounded-lg border border-[#E4E2DC] bg-[#FAF9F6] text-zinc-700 flex items-center justify-center shrink-0">
+                <i data-lucide="${cat.icon}" class="w-4 h-4"></i>
+              </div>
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-zinc-900 truncate">${escapeHtml(e.title)}</p>
+                <p class="text-xs text-zinc-500">${cat.name} · ${escapeHtml(payer)} · ${e.date}</p>
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <p class="text-sm font-semibold text-zinc-900 num">${formatINR(e.amount)}</p>
+              <p class="text-[11px] text-zinc-400">${e.split === '50-50' ? '50/50' : e.split === '100-other' ? '100% Other' : 'Personal'}</p>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderCategoryTotals(expenses) {
+      const totals = {};
+      let grand = 0;
+      expenses.forEach(e => {
+        const amt = Number(e.amount) || 0;
+        totals[e.category] = (totals[e.category] || 0) + amt;
+        grand += amt;
+      });
+      const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+      const container = document.getElementById('categoryTotalsList');
+      if (!sorted.length) {
+        container.innerHTML = `<p class="text-sm text-zinc-400">No data yet.</p>`;
+        return;
+      }
+      container.innerHTML = sorted.map(([catId, sum]) => {
+        const cat = getCategory(catId);
+        const pct = grand > 0 ? Math.round((sum / grand) * 100) : 0;
+        return `
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1.5">
+              <span class="font-medium text-zinc-700">${cat.name}</span>
+              <span class="font-semibold text-zinc-900 num">${formatINR(sum)} <span class="text-zinc-400 font-normal">(${pct}%)</span></span>
+            </div>
+            <div class="w-full h-1.5 bg-[#F0EFEA] rounded-full overflow-hidden">
+              <div class="h-full rounded-full" style="width: ${pct}%; background-color: ${cat.color}"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderExpensesTable() {
+      const q = (document.getElementById('searchInput').value || '').toLowerCase();
+      const catFilter = document.getElementById('categoryFilter').value;
+      const payerFilter = document.getElementById('payerFilter').value;
+
+      const list = getFilteredExpenses().filter(e => {
+        if (catFilter !== 'all' && e.category !== catFilter) return false;
+        if (payerFilter !== 'all' && e.paidBy !== payerFilter) return false;
+        if (q && !(e.title || '').toLowerCase().includes(q) && !(e.note || '').toLowerCase().includes(q)) return false;
+        return true;
+      });
+
+      const tbody = document.getElementById('expensesTableBody');
+      if (!list.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-10 text-center text-zinc-400">No matching entries found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = list.map(e => {
+        const cat = getCategory(e.category);
+        const payer = e.paidBy === 'you' ? state.room.youName : state.room.friendName;
+        const badgeClass = e.paidBy === 'you' ? 'bg-zinc-100 text-zinc-800' : 'bg-teal-50 text-teal-800';
+        const allowed = canModifyEntry(e);
+        const editedBadge = e.updatedAt ? `<span class="ml-1.5 px-1.5 py-0.5 rounded bg-zinc-100 text-[10px] text-zinc-500 font-medium">Edited</span>` : '';
+
+        const actionsHtml = allowed
+          ? `<button onclick="editExpense('${e.id}')" class="p-1.5 text-zinc-500 hover:text-zinc-900 rounded-md" title="Edit your entry">
+               <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+             </button>
+             <button onclick="deleteExpense('${e.id}')" class="p-1.5 text-zinc-500 hover:text-rose-600 rounded-md" title="Delete your entry">
+               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+             </button>`
+          : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#FAF9F6] border border-[#E4E2DC] text-[11px] text-zinc-400" title="Only creator can edit or delete">
+               <i data-lucide="lock" class="w-3 h-3"></i> Locked
+             </span>`;
+
+        return `
+          <tr class="hover:bg-[#FAF9F6] transition">
+            <td class="py-3 px-4 text-xs text-zinc-500 whitespace-nowrap num">${e.date}</td>
+            <td class="py-3 px-4">
+              <div class="font-medium text-zinc-900 text-sm">${escapeHtml(e.title)}${editedBadge}</div>
+              <div class="text-xs text-zinc-500">${cat.name}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
+            </td>
+            <td class="py-3 px-4">
+              <span class="px-2 py-0.5 rounded-md text-xs font-medium ${badgeClass}">${escapeHtml(payer)}</span>
+            </td>
+            <td class="py-3 px-4 text-xs text-zinc-500">${e.split === '50-50' ? '50/50' : e.split === '100-other' ? '100% Other' : 'Personal'}</td>
+            <td class="py-3 px-4 text-right font-semibold text-zinc-900 whitespace-nowrap num">${formatINR(e.amount)}</td>
+            <td class="py-3 px-4 text-right whitespace-nowrap">${actionsHtml}</td>
+          </tr>
+        `;
+      }).join('');
+      if (window.lucide) lucide.createIcons();
+    }
+
+    function renderSettlements() {
+      const list = state.settlements.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      const container = document.getElementById('settlementHistoryList');
+      if (!list.length) {
+        container.innerHTML = `<p class="text-sm text-zinc-400 py-6 text-center">No settlement payments recorded yet.</p>`;
+        return;
+      }
+      container.innerHTML = list.map(s => {
+        const who = s.from === 'friend'
+          ? `${state.room.friendName} paid ${state.room.youName}`
+          : `${state.room.youName} paid ${state.room.friendName}`;
+        return `
+          <div class="py-3 flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-zinc-900">${escapeHtml(who)}</p>
+              <p class="text-xs text-zinc-500">${s.date}${s.note ? ' · ' + escapeHtml(s.note) : ''}</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-semibold text-teal-700 num">${formatINR(s.amount)}</span>
+              <button onclick="deleteSettlement('${s.id}')" class="text-zinc-400 hover:text-rose-600 p-1">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderCharts(expenses) {
+      if (typeof Chart === 'undefined') return;
+      const catLabels = [], catValues = [], catColors = [], youByCat = [], friendByCat = [];
+
+      CATEGORIES.forEach(c => {
+        const items = expenses.filter(e => e.category === c.id);
+        const sum = items.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+        if (sum > 0) {
+          catLabels.push(c.name);
+          catValues.push(sum);
+          catColors.push(c.color);
+          youByCat.push(items.filter(e => e.paidBy === 'you').reduce((a, e) => a + Number(e.amount), 0));
+          friendByCat.push(items.filter(e => e.paidBy === 'friend').reduce((a, e) => a + Number(e.amount), 0));
+        }
+      });
+
+      const ctx1 = document.getElementById('categoryChart').getContext('2d');
+      if (categoryChartInstance) categoryChartInstance.destroy();
+      categoryChartInstance = new Chart(ctx1, {
+        type: 'doughnut',
+        data: {
+          labels: catLabels.length ? catLabels : ['No Data'],
+          datasets: [{
+            data: catValues.length ? catValues : [1],
+            backgroundColor: catColors.length ? catColors : ['#E4E2DC'],
+            borderWidth: 2,
+            borderColor: '#FFFFFF'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '68%',
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, padding: 14, font: { size: 11 } } } }
+        }
+      });
+
+      const ctx2 = document.getElementById('payerChart').getContext('2d');
+      if (payerChartInstance) payerChartInstance.destroy();
+      payerChartInstance = new Chart(ctx2, {
+        type: 'bar',
+        data: {
+          labels: catLabels,
+          datasets: [
+            { label: state.room.youName, data: youByCat, backgroundColor: '#18181B', borderRadius: 4, barPercentage: 0.7 },
+            { label: state.room.friendName, data: friendByCat, backgroundColor: '#0F766E', borderRadius: 4, barPercentage: 0.7 }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true, grid: { color: '#F0EFEA' }, border: { display: false }, ticks: { callback: v => '₹' + v, font: { size: 11 } } },
+            x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 11 } } }
+          },
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, padding: 14, font: { size: 11 } } } }
+        }
+      });
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      const views = { dashboard: 'viewDashboard', expenses: 'viewExpenses', settlements: 'viewSettlements', architecture: 'viewArchitecture' };
+      const tabs = { dashboard: 'tabDashboard', expenses: 'tabExpenses', settlements: 'tabSettlements', architecture: 'tabArchitecture' };
+      Object.keys(views).forEach(k => {
+        document.getElementById(views[k]).classList.toggle('hidden', k !== tab);
+        document.getElementById(tabs[k]).className = `nav-tab whitespace-nowrap ${k === tab ? 'nav-tab-active' : ''}`;
+      });
+      document.getElementById('kpiSection').classList.toggle('hidden', tab === 'architecture');
+      if (tab === 'dashboard') renderCharts(getFilteredExpenses());
+    }
+
+    function onFilterChange() { renderAll(); }
+
+    function switchDemoUser(who) {
+      state.activeDemoUser = who;
+      saveLocalState();
+      renderAll();
+      showToast(`Switched active user to ${who === 'you' ? state.room.youName : state.room.friendName}`);
+    }
+
+    function openExpenseModal(exp = null) {
+      document.getElementById('expenseModalTitle').textContent = exp ? 'Edit Your Expense' : 'Add Daily Expense';
+      document.getElementById('expId').value = exp ? exp.id : '';
+      document.getElementById('expTitle').value = exp ? exp.title : '';
+      document.getElementById('expAmount').value = exp ? exp.amount : '';
+      document.getElementById('expDate').value = exp ? exp.date : new Date().toISOString().slice(0, 10);
+      document.getElementById('expCategory').value = exp ? exp.category : 'vegetables';
+      document.getElementById('expPaidBy').value = exp ? exp.paidBy : state.activeDemoUser;
+      document.getElementById('expSplit').value = exp ? exp.split : '50-50';
+      document.getElementById('expNote').value = exp ? (exp.note || '') : '';
+      document.getElementById('expenseModal').classList.remove('hidden');
+    }
+
+    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+    async function saveExpense(e) {
+      e.preventDefault();
+      const existingId = document.getElementById('expId').value;
+      const existing = existingId ? state.expenses.find(x => x.id === existingId) : null;
+
+      if (existing && !canModifyEntry(existing)) {
+        showToast('Security: You can only edit your own entries');
+        return;
+      }
+
+      const id = existingId || ('e_' + Date.now());
+      const item = {
+        id,
+        title: document.getElementById('expTitle').value.trim(),
+        amount: parseFloat(document.getElementById('expAmount').value),
+        date: document.getElementById('expDate').value,
+        category: document.getElementById('expCategory').value,
+        paidBy: document.getElementById('expPaidBy').value,
+        split: document.getElementById('expSplit').value,
+        note: document.getElementById('expNote').value.trim(),
+        createdBy: existing ? (existing.createdBy || existing.paidBy) : state.activeDemoUser,
+        createdByUid: existing ? (existing.createdByUid || null) : (fbUser ? fbUser.uid : null),
+        updatedAt: existing ? new Date().toISOString() : null
+      };
+
+      if (fbDb && fbUser) {
+        await fbDb.collection('rooms').doc(state.room.code).collection('expenses').doc(id).set(item);
+      } else {
+        const idx = state.expenses.findIndex(x => x.id === id);
+        if (idx >= 0) state.expenses[idx] = item;
+        else state.expenses.unshift(item);
+        saveLocalState();
+        renderAll();
+      }
+      closeModal('expenseModal');
+      showToast(existing ? 'Entry updated!' : 'Entry added!');
+    }
+
+    function editExpense(id) {
+      const exp = state.expenses.find(e => e.id === id);
+      if (!exp) return;
+      if (!canModifyEntry(exp)) {
+        showToast('Security: Only the creator can edit this entry');
+        return;
+      }
+      openExpenseModal(exp);
+    }
+
+    async function deleteExpense(id) {
+      const exp = state.expenses.find(e => e.id === id);
+      if (!exp) return;
+      if (!canModifyEntry(exp)) {
+        showToast('Security: Only the creator can delete this entry');
+        return;
+      }
+      if (fbDb && fbUser) {
+        await fbDb.collection('rooms').doc(state.room.code).collection('expenses').doc(id).delete();
+      } else {
+        state.expenses = state.expenses.filter(e => e.id !== id);
+        saveLocalState();
+        renderAll();
+      }
+      showToast('Entry deleted');
+    }
+
+    function addRecurringTemplate() {
+      const month = document.getElementById('monthFilter').value;
+      const targetDate = month === 'all' ? new Date().toISOString().slice(0, 10) : `${month}-01`;
+      const templates = [
+        { title: 'Monthly Room Rent', amount: 9000, category: 'rent', paidBy: state.activeDemoUser },
+        { title: 'Wi-Fi / Internet Bill', amount: 799, category: 'internet', paidBy: state.activeDemoUser },
+        { title: 'Water Supply Bill', amount: 300, category: 'water', paidBy: state.activeDemoUser }
+      ];
+      let added = 0;
+      templates.forEach((tpl, i) => {
+        const exists = state.expenses.some(e => e.date.startsWith(targetDate.slice(0, 7)) && e.category === tpl.category);
+        if (!exists) {
+          state.expenses.unshift({
+            id: 'e_' + (Date.now() + i),
+            title: tpl.title,
+            amount: tpl.amount,
+            category: tpl.category,
+            paidBy: tpl.paidBy,
+            createdBy: state.activeDemoUser,
+            createdByUid: fbUser ? fbUser.uid : null,
+            split: '50-50',
+            date: targetDate,
+            note: 'Auto-added fixed monthly bill'
+          });
+          added++;
+        }
+      });
+      if (added > 0) {
+        saveLocalState();
+        renderAll();
+        showToast(`Added ${added} fixed bill${added > 1 ? 's' : ''} for ${targetDate.slice(0, 7)}`);
+      } else {
+        showToast('Fixed bills already exist for this month');
+      }
+    }
+
+    function exportExpensesCSV() {
+      const list = getFilteredExpenses();
+      if (!list.length) { showToast('No entries to export'); return; }
+      const rows = [['Date', 'Title', 'Category', 'Paid By', 'Split', 'Amount (INR)', 'Note']];
+      list.forEach(e => {
+        const payer = e.paidBy === 'you' ? state.room.youName : state.room.friendName;
+        rows.push([
+          e.date,
+          `"${(e.title || '').replace(/"/g, '""')}"`,
+          getCategory(e.category).name,
+          payer,
+          e.split,
+          e.amount,
+          `"${(e.note || '').replace(/"/g, '""')}"`
+        ]);
+      });
+      const csv = rows.map(r => r.join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `roomsplit_${state.room.code}_${document.getElementById('monthFilter').value}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('CSV statement downloaded!');
+    }
+
+    function openInviteModal() {
+      document.getElementById('inviteCodeDisplay').textContent = state.room.code;
+      document.getElementById('roomNameInput').value = state.room.name;
+      document.getElementById('roomBudgetInput').value = state.room.budgetCap || 18000;
+      document.getElementById('yourNameInput').value = state.room.youName;
+      document.getElementById('yourPhoneInput').value = state.room.youPhone || '';
+      document.getElementById('yourUpiInput').value = state.room.youUpi || '';
+      document.getElementById('friendNameInput').value = state.room.friendName;
+      document.getElementById('friendPhoneInput').value = state.room.friendPhone || '';
+      document.getElementById('friendUpiInput').value = state.room.friendUpi || '';
+      document.getElementById('inviteModal').classList.remove('hidden');
+    }
+
+    function saveRoomSettings() {
+      state.room.name = document.getElementById('roomNameInput').value.trim() || 'Room 204';
+      state.room.budgetCap = parseFloat(document.getElementById('roomBudgetInput').value) || 18000;
+      state.room.youName = document.getElementById('yourNameInput').value.trim() || 'You';
+      state.room.youPhone = document.getElementById('yourPhoneInput').value.trim();
+      state.room.youUpi = document.getElementById('yourUpiInput').value.trim();
+      state.room.friendName = document.getElementById('friendNameInput').value.trim() || 'Friend';
+      state.room.friendPhone = document.getElementById('friendPhoneInput').value.trim();
+      state.room.friendUpi = document.getElementById('friendUpiInput').value.trim();
+      saveLocalState();
+      renderAll();
+      closeModal('inviteModal');
+      showToast('Room & UPI details updated');
+    }
+
+    function joinRoomByCode() {
+      const code = (document.getElementById('joinCodeInput').value || '').trim().toUpperCase();
+      if (code.length < 4) { showToast('Enter a valid room code'); return; }
+      state.room.code = code;
+      saveLocalState();
+      if (fbDb && fbUser) subscribeToFirestoreRoom(code);
+      renderAll();
+      closeModal('inviteModal');
+      showToast(`Joined room ${code}`);
+    }
+
+    function copyText(text, label) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast(label)).catch(() => fallbackCopy(text, label));
+      } else { fallbackCopy(text, label); }
+    }
+
+    function fallbackCopy(text, label) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); showToast(label); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
+    function copyInviteCode() { copyText(state.room.code, 'Room code copied!'); }
+    function copyInviteLink() { copyText(`${window.location.href.split('#')[0]}#join=${state.room.code}`, 'Invite link copied!'); }
+    function copyRules() { copyText(document.getElementById('firestoreRulesCode').textContent, 'Firestore rules copied!'); }
+
+    function buildUpiUri(fromWho, amount) {
+      const payeeName = fromWho === 'friend' ? state.room.youName : state.room.friendName;
+      const payeeUpi = fromWho === 'friend' ? state.room.youUpi : state.room.friendUpi;
+      const amt = (Number(amount) || 0).toFixed(2);
+      if (!payeeUpi) return { uri: '', payeeName, payeeUpi: 'Not configured' };
+      const uri = `upi://pay?pa=${encodeURIComponent(payeeUpi)}&pn=${encodeURIComponent(payeeName)}&am=${amt}&cu=INR&tn=${encodeURIComponent('RoomSplit Settlement')}`;
+      return { uri, payeeName, payeeUpi };
+    }
+
+    function refreshUpiQr() {
+      const fromWho = document.getElementById('settleFrom').value;
+      const amount = document.getElementById('settleAmount').value || 0;
+      const { uri, payeeName, payeeUpi } = buildUpiUri(fromWho, amount);
+
+      document.getElementById('upiPayeeLabel').textContent = `Pay ${payeeName} ${amount ? formatINR(amount) : ''}`;
+      document.getElementById('upiIdLabel').textContent = `UPI ID: ${payeeUpi}`;
+
+      const btn = document.getElementById('upiDeepLinkBtn');
+      if (uri) {
+        btn.href = uri;
+        btn.classList.remove('opacity-50', 'pointer-events-none');
+      } else {
+        btn.href = '#';
+        btn.classList.add('opacity-50', 'pointer-events-none');
+      }
+
+      const qrBox = document.getElementById('upiQrContainer');
+      qrBox.innerHTML = '';
+      if (uri && typeof QRCode !== 'undefined') {
+        new QRCode(qrBox, { text: uri, width: 124, height: 124, colorDark: '#18181B', colorLight: '#ffffff' });
+      } else {
+        qrBox.innerHTML = `<p class="text-[11px] text-zinc-400 px-4 py-8">${uri ? 'QR ready' : 'Add UPI ID in Invite & UPI'}</p>`;
+      }
+    }
+
+    function openSettleModal() {
+      const bal = computeBalances(getFilteredExpenses(), state.settlements);
+      document.getElementById('settleFrom').value = bal.net >= 0 ? 'friend' : 'you';
+      document.getElementById('settleAmount').value = Math.round(Math.abs(bal.net)) || '';
+      document.getElementById('settleNote').value = '';
+      document.getElementById('settleModal').classList.remove('hidden');
+      refreshUpiQr();
+    }
+
+    function sendWhatsAppUpiRequest() {
+      const bal = computeBalances(getFilteredExpenses(), state.settlements);
+      const amt = Math.round(Math.abs(bal.net));
+      if (amt < 1) { showToast('All settled up — no balance to request!'); return; }
+      const fromWho = bal.net >= 0 ? 'friend' : 'you';
+      const { uri, payeeName, payeeUpi } = buildUpiUri(fromWho, amt);
+      const targetPhone = fromWho === 'friend' ? state.room.friendPhone : state.room.youPhone;
+      const payerName = fromWho === 'friend' ? state.room.friendName : state.room.youName;
+
+      const msg = `Hi ${payerName}, our ${state.room.name} RoomSplit balance is ${formatINR(amt)} payable to ${payeeName}. Please pay via UPI (${payeeUpi}): ${uri}`;
+      const cleanPhone = (targetPhone || '').replace(/\D/g, '');
+      const waUrl = cleanPhone
+        ? `https://wa.me/91${cleanPhone.slice(-10)}?text=${encodeURIComponent(msg)}`
+        : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      window.open(waUrl, '_blank', 'noopener');
+      showToast('Opening UPI payment request...');
+    }
+
+    async function saveSettlement(e) {
+      e.preventDefault();
+      const id = 's_' + Date.now();
+      const item = {
+        id,
+        from: document.getElementById('settleFrom').value,
+        amount: parseFloat(document.getElementById('settleAmount').value),
+        date: new Date().toISOString().slice(0, 10),
+        note: document.getElementById('settleNote').value.trim() || 'UPI / Cash',
+        createdBy: state.activeDemoUser,
+        createdByUid: fbUser ? fbUser.uid : null
+      };
+      if (fbDb && fbUser) {
+        await fbDb.collection('rooms').doc(state.room.code).collection('settlements').doc(id).set(item);
+      } else {
+        state.settlements.unshift(item);
+        saveLocalState();
+        renderAll();
+      }
+      closeModal('settleModal');
+      showToast('Settlement recorded!');
+    }
+
+    async function deleteSettlement(id) {
+      if (fbDb && fbUser) {
+        await fbDb.collection('rooms').doc(state.room.code).collection('settlements').doc(id).delete();
+      } else {
+        state.settlements = state.settlements.filter(s => s.id !== id);
+        saveLocalState();
+        renderAll();
+      }
+      showToast('Settlement removed');
+    }
+
+    function openFirebaseModal() { document.getElementById('firebaseModal').classList.remove('hidden'); }
+
+    function initFirebase(config) {
+      if (typeof firebase === 'undefined') { showToast('Firebase SDK not loaded'); return; }
+      try {
+        fbApp = !firebase.apps.length ? firebase.initializeApp(config) : firebase.app();
+        fbAuth = firebase.auth();
+        fbDb = firebase.firestore();
+        document.getElementById('firebaseAuthPanel').classList.remove('hidden');
+        fbAuth.onAuthStateChanged(user => {
+          fbUser = user;
+          if (user) {
+            document.getElementById('authSignedOutView').classList.add('hidden');
+            document.getElementById('authSignedInView').classList.remove('hidden');
+            document.getElementById('authUserEmail').textContent = user.email;
+            document.getElementById('modeBadge').innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-teal-600"></span> Live`;
+            document.getElementById('modeBadge').className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-teal-50 text-teal-800 border border-teal-200';
+            subscribeToFirestoreRoom(state.room.code);
+          } else {
+            document.getElementById('authSignedOutView').classList.remove('hidden');
+            document.getElementById('authSignedInView').classList.add('hidden');
+          }
+        });
+        showToast('Firebase initialized! Please sign in.');
+      } catch (err) { showToast('Invalid Firebase config: ' + err.message); }
+    }
+
+    function connectFirebaseFromModal() {
+      const raw = document.getElementById('firebaseConfigInput').value.trim();
+      try {
+        const cfg = JSON.parse(raw);
+        try { localStorage.setItem('roomsplit_fb_config', raw); } catch (e) {}
+        initFirebase(cfg);
+      } catch (err) { showToast('Please paste valid JSON config'); }
+    }
+
+    function disconnectFirebase() {
+      try { localStorage.removeItem('roomsplit_fb_config'); } catch (e) {}
+      if (unsubExpenses) unsubExpenses();
+      if (unsubSettlements) unsubSettlements();
+      fbDb = null;
+      fbUser = null;
+      document.getElementById('modeBadge').innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Demo`;
+      document.getElementById('modeBadge').className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200/70';
+      closeModal('firebaseModal');
+      renderAll();
+      showToast('Switched to Demo Mode');
+    }
+
+    async function firebaseSignIn() {
+      const email = document.getElementById('authEmail').value.trim();
+      const pass = document.getElementById('authPassword').value;
+      try { await fbAuth.signInWithEmailAndPassword(email, pass); showToast('Signed in!'); }
+      catch (err) { showToast(err.message); }
+    }
+
+    async function firebaseSignUp() {
+      const email = document.getElementById('authEmail').value.trim();
+      const pass = document.getElementById('authPassword').value;
+      try { await fbAuth.createUserWithEmailAndPassword(email, pass); showToast('Account created!'); }
+      catch (err) { showToast(err.message); }
+    }
+
+    async function firebaseSignOut() {
+      if (fbAuth) await fbAuth.signOut();
+      showToast('Signed out');
+    }
+
+    function subscribeToFirestoreRoom(roomCode) {
+      if (!fbDb) return;
+      if (unsubExpenses) unsubExpenses();
+      if (unsubSettlements) unsubSettlements();
+      unsubExpenses = fbDb.collection('rooms').doc(roomCode).collection('expenses').onSnapshot(snap => {
+        state.expenses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderAll();
+      });
+      unsubSettlements = fbDb.collection('rooms').doc(roomCode).collection('settlements').onSnapshot(snap => {
+        state.settlements = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderAll();
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const expCat = document.getElementById('expCategory');
+      const filterCat = document.getElementById('categoryFilter');
+      CATEGORIES.forEach(c => {
+        expCat.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+        filterCat.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+      });
+
+      if (window.location.hash.startsWith('#join=')) {
+        const code = window.location.hash.replace('#join=', '').trim().toUpperCase();
+        if (code) state.room.code = code;
+      }
+
+      let savedCfg = DEFAULT_FIREBASE_CONFIG;
+      if (!savedCfg) {
+        try {
+          const raw = localStorage.getItem('roomsplit_fb_config');
+          if (raw) {
+            savedCfg = JSON.parse(raw);
+            document.getElementById('firebaseConfigInput').value = raw;
+          }
+        } catch (e) {}
+      }
+      if (savedCfg) initFirebase(savedCfg);
+      renderAll();
+    });
+  </script>
+</body>
+</html>
