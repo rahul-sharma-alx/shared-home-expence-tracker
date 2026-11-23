@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   mapCloudExpense,
+  mapCloudRoomMembership,
   mapCloudSettlement,
   toRoomState,
   type CloudRoom,
@@ -61,6 +62,28 @@ describe("roommate perspective mapping", () => {
 });
 
 describe("cloud record validation", () => {
+  it("maps room memberships and rejects mismatched room IDs or roles", () => {
+    expect(mapCloudRoomMembership("room-id", {
+      roomId: "room-id",
+      roomName: "Apartment",
+      role: "owner",
+    })).toEqual({
+      roomId: "room-id",
+      roomName: "Apartment",
+      role: "owner",
+    });
+    expect(mapCloudRoomMembership("room-id", {
+      roomId: "another-room",
+      roomName: "Apartment",
+      role: "owner",
+    })).toBeNull();
+    expect(mapCloudRoomMembership("room-id", {
+      roomId: "room-id",
+      roomName: "Apartment",
+      role: "admin",
+    })).toBeNull();
+  });
+
   it("maps valid expense data and preserves roommate perspective", () => {
     const mapped = mapCloudExpense("expense-id", {
       title: "Groceries",

@@ -10,6 +10,23 @@ const expenses: Expense[] = [
 ];
 
 describe("expense calculations", () => {
+  it("applies a roommate payment to the balance across shared expenses", () => {
+    const sharedExpenses: Expense[] = [
+      { id: "paid-3000", title: "Shared costs", amount: 3000, date: "2026-11-01", category: "rent", paidBy: "you", split: "50-50", createdBy: "you" },
+      { id: "paid-2000", title: "Shared costs", amount: 2000, date: "2026-11-02", category: "groceries", paidBy: "friend", split: "50-50", createdBy: "friend" },
+    ];
+    const payment: Settlement = {
+      id: "payment-500",
+      from: "friend",
+      amount: 500,
+      date: "2026-11-03",
+      createdBy: "friend",
+    };
+
+    expect(calculateBalances(sharedExpenses, []).net).toBe(500);
+    expect(calculateBalances(sharedExpenses, [payment]).net).toBe(0);
+  });
+
   it("calculates 50-50 splits", () => {
     const result = calculateBalances([expenses[0]], []);
     expect(result.totalSpent).toBe(1000);

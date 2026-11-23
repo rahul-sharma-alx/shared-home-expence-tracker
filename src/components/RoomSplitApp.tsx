@@ -44,12 +44,15 @@ import {
   joinRoom,
   removeDocument,
   saveUserProfile,
+  migrateLegacyRoomMembership,
   subscribeToProfile,
   subscribeToRoom,
+  subscribeToUserRooms,
   toRoomState,
   updateRoomSettings,
   type CloudRoom,
   type RoomMember,
+  type RoomMembership,
   type UserProfile,
 } from "@/src/features/room/cloud-repository";
 
@@ -96,7 +99,11 @@ export function RoomSplitApp() {
   const [authReady, setAuthReady] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [cloudRoom, setCloudRoom] = useState<CloudRoom | null>(null);
+  const [roomMemberships, setRoomMemberships] = useState<RoomMembership[]>([]);
+  const [roomMembershipsLoaded, setRoomMembershipsLoaded] = useState(false);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [members, setMembers] = useState<RoomMember[]>([]);
+  const [membersLoaded, setMembersLoaded] = useState(false);
   const [cloudExpenses, setCloudExpenses] = useState<Expense[]>([]);
   const [cloudSettlements, setCloudSettlements] = useState<Settlement[]>([]);
   const [dataError, setDataError] = useState("");
@@ -114,6 +121,8 @@ export function RoomSplitApp() {
   const [roomName, setRoomName] = useState("");
   const [budgetCap, setBudgetCap] = useState("");
   const [inviteToken, setInviteToken] = useState("");
+  const [createRoomOpen, setCreateRoomOpen] = useState(false);
+  const legacyMigrationAttempts = useRef(new Set<string>());
 
   useEffect(() => {
     try {
@@ -138,10 +147,15 @@ export function RoomSplitApp() {
           setAuthReady(true);
           setProfile(null);
           setCloudRoom(null);
+          setRoomMemberships([]);
+          setRoomMembershipsLoaded(false);
+          setActiveRoomId(null);
           setMembers([]);
+          setMembersLoaded(false);
           setCloudExpenses([]);
           setCloudSettlements([]);
           setDataError("");
+          legacyMigrationAttempts.current.clear();
         },
         (error) => {
           setDataError(error.message);
@@ -177,29 +191,83 @@ export function RoomSplitApp() {
   }, [authUser]);
 
   useEffect(() => {
-    if (!firestore || !authUser || !profile?.roomId) {
+    if (!firestore || !authUser) return;
+    return subscribeToUserRooms(
+      firestore,
+      authUser.uid,
+      (rooms) => {
+        setRoomMemberships(rooms);
+        setRoomMembershipsLoaded(true);
+        setActiveRoomId((current) => current || rooms[0]?.roomId || null);
+      },
+      (error) => {
+        setDataError(error.message);
+        setRoomMembershipsLoaded(true);
+      },
+    );
+  }, [authUser]);
+
+  useEffect(() => {
+    const legacyRoomId = profile?.roomId;
+    if (
+      !firestore
+      || !authUser
+      || !roomMembershipsLoaded
+      || !legacyRoomId
+      || roomMemberships.some((room) => room.roomId === legacyRoomId)
+    ) {
       return;
     }
-    return subscribeToRoom(firestore, profile.roomId, authUser, {
+
+    const attemptKey = `${authUser.uid}:${legacyRoomId}`;
+    if (legacyMigrationAttempts.current.has(attemptKey)) return;
+    legacyMigrationAttempts.current.add(attemptKey);
+    let cancelled = false;
+    void migrateLegacyRoomMembership(firestore, authUser.uid, legacyRoomId)
+      .then((membership) => {
+        if (!membership || cancelled) return;
+        setRoomMemberships((current) => current.some((room) => room.roomId === membership.roomId)
+          ? current
+          : [...current, membership]);
+        setActiveRoomId((current) => current || membership.roomId);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setDataError(error instanceof Error ? error.message : "Could not load your existing room.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser, profile?.roomId, roomMemberships, roomMembershipsLoaded]);
+
+  useEffect(() => {
+    if (!firestore || !authUser || !activeRoomId) return;
+    return subscribeToRoom(firestore, activeRoomId, authUser, {
       onRoom: (room) => {
         setCloudRoom(room);
       },
-      onMembers: setMembers,
+      onMembers: (nextMembers) => {
+        setMembers(nextMembers);
+        setMembersLoaded(true);
+      },
       onExpenses: setCloudExpenses,
       onSettlements: setCloudSettlements,
       onError: (error) => {
         setDataError(error.message);
       },
     });
-  }, [authUser, profile?.roomId]);
+  }, [activeRoomId, authUser]);
 
+  const activeCloudRoom = cloudRoom?.id === activeRoomId ? cloudRoom : null;
   const state = useMemo(
-    () => cloudRoom && authUser
-      ? toRoomState(cloudRoom, members, cloudExpenses, cloudSettlements, authUser.uid)
+    () => activeCloudRoom && authUser
+      ? toRoomState(activeCloudRoom, members, cloudExpenses, cloudSettlements, authUser.uid)
       : EMPTY_ROOM_STATE,
-    [cloudRoom, members, cloudExpenses, cloudSettlements, authUser],
+    [activeCloudRoom, members, cloudExpenses, cloudSettlements, authUser],
   );
-  const roomLoading = Boolean(profile?.roomId && !cloudRoom);
+  const roomLoading = Boolean(activeRoomId && !activeCloudRoom);
+  const hasRooms = roomMemberships.length > 0 || Boolean(profile?.roomId);
 
   useEffect(() => {
     if (!toast) return;
@@ -230,15 +298,39 @@ export function RoomSplitApp() {
     return Boolean(authUser && expense.createdByUid === authUser.uid);
   }
 
+  function switchRoom(roomId: string) {
+    if (roomId === activeRoomId) return;
+    setActiveRoomId(roomId);
+    setCloudRoom(null);
+    setMembers([]);
+    setMembersLoaded(false);
+    setCloudExpenses([]);
+    setCloudSettlements([]);
+    setDataError("");
+    setMonth("all");
+    setQuery("");
+    setCategoryFilter("all");
+    setPayerFilter("all");
+    setTab("overview");
+  }
+
+  function activateMembership(membership: RoomMembership) {
+    setRoomMemberships((current) => [
+      ...current.filter((room) => room.roomId !== membership.roomId),
+      membership,
+    ]);
+    switchRoom(membership.roomId);
+  }
+
   function openExpense(expense?: Expense) {
     setEditingExpense(expense || null);
     setModal("expense");
   }
 
   async function saveExpense(expense: Expense) {
-    if (!firestore || !authUser || !profile?.roomId) return;
+    if (!firestore || !authUser || !activeRoomId) return;
     try {
-      await setDoc(doc(firestore, "rooms", profile.roomId, "expenses", expense.id), {
+      await setDoc(doc(firestore, "rooms", activeRoomId, "expenses", expense.id), {
         title: expense.title,
         amount: expense.amount,
         date: expense.date,
@@ -257,9 +349,9 @@ export function RoomSplitApp() {
   }
 
   async function deleteExpense(id: string) {
-    if (!firestore || !profile?.roomId) return;
+    if (!firestore || !activeRoomId) return;
     try {
-      await removeDocument(firestore, profile.roomId, "expenses", id);
+      await removeDocument(firestore, activeRoomId, "expenses", id);
       setToast("Expense deleted");
     } catch (error) {
       setDataError(error instanceof Error ? error.message : "Could not delete this expense.");
@@ -324,7 +416,11 @@ export function RoomSplitApp() {
     setFormBusy(true);
     setDataError("");
     try {
-      await createRoom(firestore, authUser, profile, roomName, Number(budgetCap));
+      const membership = await createRoom(firestore, authUser, profile, roomName, Number(budgetCap));
+      activateMembership(membership);
+      setRoomName("");
+      setBudgetCap("");
+      setCreateRoomOpen(false);
       setToast("Room created");
     } catch (error) {
       setDataError(error instanceof Error ? error.message : "Could not create this room.");
@@ -338,7 +434,8 @@ export function RoomSplitApp() {
     setFormBusy(true);
     setDataError("");
     try {
-      await joinRoom(firestore, authUser, profile, inviteToken);
+      const membership = await joinRoom(firestore, authUser, profile, inviteToken);
+      activateMembership(membership);
       setInviteToken("");
       window.history.replaceState(null, "", window.location.pathname);
       setToast("You joined the room");
@@ -352,7 +449,7 @@ export function RoomSplitApp() {
   async function handleSaveProfile(nextProfile: UserProfile) {
     if (!firestore || !authUser) return;
     try {
-      await saveUserProfile(firestore, authUser.uid, nextProfile);
+      await saveUserProfile(firestore, authUser.uid, nextProfile, roomMemberships);
       setProfile(nextProfile);
       setProfileOpen(false);
       setToast("Profile saved");
@@ -362,9 +459,19 @@ export function RoomSplitApp() {
   }
 
   async function handleSaveRoom(name: string, budget: number) {
-    if (!firestore || !cloudRoom) return;
+    if (!firestore || !authUser || !activeCloudRoom || !membersLoaded) return;
     try {
-      await updateRoomSettings(firestore, cloudRoom.id, name, budget);
+      await updateRoomSettings(
+        firestore,
+        activeCloudRoom.id,
+        activeCloudRoom.inviteToken,
+        name,
+        budget,
+        members,
+      );
+      setRoomMemberships((current) => current.map((room) =>
+        room.roomId === activeCloudRoom.id ? { ...room, roomName: name } : room,
+      ));
       setModal(null);
       setToast("Room settings saved");
     } catch (error) {
@@ -373,9 +480,9 @@ export function RoomSplitApp() {
   }
 
   async function saveSettlement(settlement: Settlement) {
-    if (!firestore || !authUser || !profile?.roomId) return;
+    if (!firestore || !authUser || !activeRoomId) return;
     try {
-      await setDoc(doc(firestore, "rooms", profile.roomId, "settlements", settlement.id), {
+      await setDoc(doc(firestore, "rooms", activeRoomId, "settlements", settlement.id), {
         amount: settlement.amount,
         date: settlement.date,
         note: settlement.note || "",
@@ -390,9 +497,9 @@ export function RoomSplitApp() {
   }
 
   async function deleteSettlement(id: string) {
-    if (!firestore || !profile?.roomId) return;
+    if (!firestore || !activeRoomId) return;
     try {
-      await removeDocument(firestore, profile.roomId, "settlements", id);
+      await removeDocument(firestore, activeRoomId, "settlements", id);
       setToast("Settlement deleted");
     } catch (error) {
       setDataError(error instanceof Error ? error.message : "Could not delete this settlement.");
@@ -400,8 +507,8 @@ export function RoomSplitApp() {
   }
 
   async function copyRoomInvite() {
-    if (!cloudRoom) return;
-    await copyText(`${window.location.origin}/#join=${cloudRoom.inviteToken}`, "Invite link copied");
+    if (!activeCloudRoom) return;
+    await copyText(`${window.location.origin}/#join=${activeCloudRoom.inviteToken}`, "Invite link copied");
   }
 
   function downloadCsv() {
@@ -458,6 +565,18 @@ export function RoomSplitApp() {
     upiId: "",
     roomId: null,
   };
+  const availableRooms = roomMemberships.map(({ roomId, roomName }) => ({ roomId, roomName }));
+  if (
+    profile?.roomId
+    && !availableRooms.some((room) => room.roomId === profile.roomId)
+  ) {
+    availableRooms.push({
+      roomId: profile.roomId,
+      roomName: activeCloudRoom?.id === profile.roomId
+        ? activeCloudRoom.name
+        : `Room ${profile.roomId.slice(0, 6)}`,
+    });
+  }
 
   if (!authReady) return <CenteredMessage message="Loading RoomSplit…" />;
 
@@ -472,10 +591,16 @@ export function RoomSplitApp() {
   if (!profile) {
     return <CenteredMessage message={dataError || "Loading your account…"} error={Boolean(dataError)} />;
   }
-  if (profile.roomId && roomLoading && !dataError) return <CenteredMessage message="Loading your room…" />;
-  if (profile.roomId && !cloudRoom && dataError) return <CenteredMessage message={dataError} error />;
+  if (!roomMembershipsLoaded && !hasRooms) {
+    return <CenteredMessage message={dataError || "Loading your rooms…"} error={Boolean(dataError)} />;
+  }
+  if (hasRooms && !activeRoomId) {
+    return <CenteredMessage message={dataError || "Loading your room list…"} error={Boolean(dataError)} />;
+  }
+  if (activeRoomId && roomLoading && !dataError) return <CenteredMessage message="Loading selected room…" />;
+  if (hasRooms && !activeCloudRoom && dataError) return <CenteredMessage message={dataError} error />;
 
-  if (!profile.roomId || !cloudRoom) {
+  if (!hasRooms) {
     if (!authUser) return <CenteredMessage message="Loading your account…" />;
     return (
       <>
@@ -505,6 +630,9 @@ export function RoomSplitApp() {
       </>
     );
   }
+  if (!activeCloudRoom) {
+    return <CenteredMessage message={dataError || "Loading selected room…"} error={Boolean(dataError)} />;
+  }
 
   return (
     <div className="min-h-dvh bg-zinc-50 text-zinc-900">
@@ -530,6 +658,27 @@ export function RoomSplitApp() {
             </button>
           </div>
         </div>
+        <div className="mx-auto flex max-w-7xl items-center gap-2 px-3 pb-3 sm:px-6">
+          <label className="sr-only" htmlFor="active-room">Active room</label>
+          <select
+            id="active-room"
+            value={activeRoomId || ""}
+            onChange={(event) => switchRoom(event.target.value)}
+            aria-label="Switch room"
+            className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold sm:max-w-sm"
+          >
+            {availableRooms.map((room) => (
+              <option key={room.roomId} value={room.roomId}>{room.roomName}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setCreateRoomOpen(true)}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold"
+          >
+            <Plus size={14} /> <span>New room</span>
+          </button>
+        </div>
         <nav className="mx-auto hidden max-w-7xl gap-5 overflow-x-auto px-4 md:flex sm:px-6" aria-label="Main navigation">
           {([
             ["overview", "Overview"],
@@ -552,6 +701,17 @@ export function RoomSplitApp() {
 
       <main className="mobile-main mx-auto max-w-7xl px-3 py-4 sm:px-6 sm:py-5">
         {dataError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{dataError}</p>}
+        {inviteToken && (
+          <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div>
+              <p className="text-sm font-bold text-emerald-900">Room invitation</p>
+              <p className="mt-1 text-xs text-emerald-800">Join another room without changing or losing this room’s ledger.</p>
+            </div>
+            <button type="button" disabled={formBusy} onClick={() => void handleJoinRoom()} className="rounded-lg bg-emerald-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
+              {formBusy ? "Joining…" : "Join room"}
+            </button>
+          </section>
+        )}
         {tab !== "security" && (
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -586,7 +746,7 @@ export function RoomSplitApp() {
             <section className="rounded-xl border border-zinc-200 bg-white p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-sm font-bold">Monthly budget</h2>
-                <button type="button" onClick={() => setModal("settings")} aria-label="Edit monthly budget" className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-zinc-900"><Settings size={16} /></button>
+                <button type="button" onClick={() => setModal("settings")} disabled={activeCloudRoom.ownerUid !== authUser.uid || !membersLoaded} aria-label="Edit monthly budget" className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-100 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-zinc-900"><Settings size={16} /></button>
               </div>
               <div className="mb-2 flex items-end justify-between">
                 <span className="text-2xl font-bold">{formatINR(balances.totalSpent)}</span>
@@ -682,12 +842,12 @@ export function RoomSplitApp() {
           <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
             <section className="rounded-xl border border-zinc-200 bg-white p-5">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-sm font-bold">Settlement history</h2>
-                <button type="button" onClick={() => setModal("settlement")} className="flex items-center gap-2 rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white"><ArrowLeftRight size={14} /> Settle up</button>
+                <h2 className="text-sm font-bold">Payment history</h2>
+                <button type="button" onClick={() => setModal("settlement")} className="flex items-center gap-2 rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white"><ArrowLeftRight size={14} /> Record payment</button>
               </div>
               {state.settlements.filter((settlement) => month === "all" || settlement.date.startsWith(month)).map((settlement) => (
                 <div key={settlement.id} className="flex items-center justify-between gap-3 border-b border-zinc-100 py-3 last:border-0">
-                  <div className="min-w-0"><p className="break-words text-sm font-semibold">{settlement.from === "you" ? state.room.youName : state.room.friendName} → {settlement.from === "you" ? state.room.friendName : state.room.youName}</p><p className="break-words text-xs text-zinc-400">{settlement.date} · {settlement.note || "Settlement"}</p></div>
+                  <div className="min-w-0"><p className="break-words text-sm font-semibold">{settlement.from === "you" ? state.room.youName : state.room.friendName} → {settlement.from === "you" ? state.room.friendName : state.room.youName}</p><p className="break-words text-xs text-zinc-400">{settlement.date} · {settlement.note || "Payment"}</p></div>
                   <div className="flex shrink-0 items-center gap-3"><span className="font-bold">{formatINR(settlement.amount)}</span>{canModifySettlement(settlement) && <button type="button" onClick={() => void deleteSettlement(settlement.id)} aria-label="Delete settlement" className="rounded p-1 focus-visible:outline-2 focus-visible:outline-zinc-900"><Trash2 size={14} /></button>}</div>
                 </div>
               ))}
@@ -709,8 +869,8 @@ export function RoomSplitApp() {
               </div>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => setModal("settings")} disabled={cloudRoom.ownerUid !== authUser.uid} className="rounded-lg border border-zinc-200 p-4 text-left disabled:opacity-50"><p className="font-semibold">Room settings</p><p className="mt-1 text-xs text-zinc-500">Name and monthly budget · owner only</p></button>
-              {cloudRoom.roommateUid ? (
+              <button type="button" onClick={() => setModal("settings")} disabled={activeCloudRoom.ownerUid !== authUser.uid || !membersLoaded} className="rounded-lg border border-zinc-200 p-4 text-left disabled:opacity-50"><p className="font-semibold">Room settings</p><p className="mt-1 text-xs text-zinc-500">Name and monthly budget · owner only</p></button>
+              {activeCloudRoom.roommateUid ? (
                 <div className="rounded-lg border border-zinc-200 p-4"><p className="font-semibold">Roommate joined</p><p className="mt-1 text-xs text-zinc-500">{state.room.friendName} is a member of this room.</p></div>
               ) : (
                 <button type="button" onClick={() => void copyRoomInvite()} className="rounded-lg border border-zinc-200 p-4 text-left"><p className="font-semibold">Invite roommate</p><p className="mt-1 text-xs text-zinc-500">Copy a private link for room {state.room.code}</p></button>
@@ -752,7 +912,7 @@ export function RoomSplitApp() {
         />
       )}
       {modal === "settings" && (
-        cloudRoom && <SettingsModal room={cloudRoom} onClose={() => setModal(null)} onSave={handleSaveRoom} />
+        activeCloudRoom && <SettingsModal room={activeCloudRoom} onClose={() => setModal(null)} onSave={handleSaveRoom} />
       )}
       {modal === "settlement" && (
         <SettlementModal state={state} balances={balances} onClose={() => setModal(null)} onSave={saveSettlement} />
@@ -765,6 +925,16 @@ export function RoomSplitApp() {
           onClose={() => setProfileOpen(false)}
           onSave={handleSaveProfile}
         />
+      )}
+      {createRoomOpen && (
+        <Dialog title="Create another room" onClose={() => setCreateRoomOpen(false)}>
+          <form onSubmit={handleCreateRoom} className="grid gap-4 p-5">
+            <p className="text-sm leading-6 text-zinc-500">Each room has a separate member list, budget, expenses, and payment history.</p>
+            <label className="grid gap-1 text-xs font-semibold">Room name<input required maxLength={80} value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="e.g. Apartment 204" className="rounded-lg border border-zinc-200 px-3 py-2.5 text-sm font-normal" /></label>
+            <label className="grid gap-1 text-xs font-semibold">Monthly budget (INR)<input required type="number" min="0" max="1000000000" value={budgetCap} onChange={(event) => setBudgetCap(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2.5 text-sm font-normal" /></label>
+            <button type="submit" disabled={formBusy} className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white disabled:opacity-50">{formBusy ? "Creating…" : "Create room"}</button>
+          </form>
+        </Dialog>
       )}
       {toast && <div role="status" className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-1/2 z-50 -translate-x-1/2 rounded-lg bg-zinc-900 px-4 py-3 text-sm text-white shadow-xl md:bottom-5">{toast}</div>}
     </div>
@@ -1009,8 +1179,8 @@ function RoomSetupScreen({
           <h2 className="text-lg font-bold">Create a room</h2>
           <p className="mt-1 text-sm text-zinc-500">Create a shared ledger, then invite one roommate using a private link.</p>
           <form onSubmit={onCreate} className="mt-5 grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-1 text-xs font-semibold sm:col-span-2">Room name<input required value={roomName} onChange={(event) => onRoomNameChange(event.target.value)} placeholder="e.g. Apartment 204" className="rounded-lg border border-zinc-200 px-3 py-2.5 text-sm font-normal" /></label>
-            <label className="grid gap-1 text-xs font-semibold">Monthly budget (INR)<input required type="number" min="0" value={budgetCap} onChange={(event) => onBudgetChange(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2.5 text-sm font-normal" /></label>
+            <label className="grid gap-1 text-xs font-semibold sm:col-span-2">Room name<input required maxLength={80} value={roomName} onChange={(event) => onRoomNameChange(event.target.value)} placeholder="e.g. Apartment 204" className="rounded-lg border border-zinc-200 px-3 py-2.5 text-sm font-normal" /></label>
+            <label className="grid gap-1 text-xs font-semibold">Monthly budget (INR)<input required type="number" min="0" max="1000000000" value={budgetCap} onChange={(event) => onBudgetChange(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2.5 text-sm font-normal" /></label>
             <div className="flex items-end"><button type="submit" disabled={busy} className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Creating…" : "Create room"}</button></div>
           </form>
         </section>
@@ -1040,10 +1210,10 @@ function ProfileModal({
         event.preventDefault();
         onSave({ ...profile, name: name.trim(), email: email.trim(), phone: phone.trim(), upiId: upiId.trim() });
       }}>
-        <label className="grid gap-1 text-xs font-semibold">Name<input required value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
-        <label className="grid gap-1 text-xs font-semibold">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /><span className="font-normal text-zinc-400">Profile contact email; Google sign-in email is managed by Google.</span></label>
-        <label className="grid gap-1 text-xs font-semibold">Phone number<input type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
-        <label className="grid gap-1 text-xs font-semibold">UPI ID<input value={upiId} onChange={(event) => setUpiId(event.target.value)} placeholder="name@bank" className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+        <label className="grid gap-1 text-xs font-semibold">Name<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+        <label className="grid gap-1 text-xs font-semibold">Email<input required maxLength={254} type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /><span className="font-normal text-zinc-400">Profile contact email; Google sign-in email is managed by Google.</span></label>
+        <label className="grid gap-1 text-xs font-semibold">Phone number<input type="tel" maxLength={20} value={phone} onChange={(event) => setPhone(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+        <label className="grid gap-1 text-xs font-semibold">UPI ID<input maxLength={100} value={upiId} onChange={(event) => setUpiId(event.target.value)} placeholder="name@bank" className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         <button type="submit" className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white">Save profile</button>
       </form>
     </Dialog>
@@ -1137,9 +1307,9 @@ function ExpenseModal({
           });
         }}
       >
-        <label className="grid gap-1 text-xs font-semibold">Title<input required value={title} onChange={(event) => setTitle(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+        <label className="grid gap-1 text-xs font-semibold">Title<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         <div className="grid grid-cols-2 gap-3">
-          <label className="grid gap-1 text-xs font-semibold">Amount<input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+          <label className="grid gap-1 text-xs font-semibold">Amount<input required min="0.01" max="1000000000" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
           <label className="grid gap-1 text-xs font-semibold">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -1147,7 +1317,7 @@ function ExpenseModal({
           <div className="grid content-center gap-1 text-xs font-semibold">Paid by<span className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal">{state.room.youName} (you)</span></div>
         </div>
         <label className="grid gap-1 text-xs font-semibold">Split<select value={split} onChange={(event) => setSplit(event.target.value as ExpenseSplit)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal"><option value="50-50">50-50</option><option value="100-other">100% other person</option><option value="personal">Personal</option></select></label>
-        <label className="grid gap-1 text-xs font-semibold">Note<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+        <label className="grid gap-1 text-xs font-semibold">Note<textarea maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         <button type="submit" disabled={busy} className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : expense ? "Save changes" : "Add expense"}</button>
       </form>
     </Dialog>
@@ -1168,8 +1338,8 @@ function SettingsModal({
   return (
     <Dialog title="Room & Profiles" onClose={onClose}>
       <form className="grid gap-4 p-5" onSubmit={(event) => { event.preventDefault(); onSave(name.trim(), Number(budgetCap)); }}>
-        <label className="grid gap-1 text-xs font-semibold">Room name<input required value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
-        <label className="grid gap-1 text-xs font-semibold">Monthly budget<input required type="number" min="0" value={budgetCap} onChange={(event) => setBudgetCap(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+        <label className="grid gap-1 text-xs font-semibold">Room name<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+        <label className="grid gap-1 text-xs font-semibold">Monthly budget<input required type="number" min="0" max="1000000000" value={budgetCap} onChange={(event) => setBudgetCap(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         <p className="text-xs text-zinc-500">Room code: {room.code}. Each roommate manages their own contact and UPI details from Profile.</p>
         <button type="submit" className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white">Save settings</button>
       </form>
@@ -1195,7 +1365,7 @@ function SettlementModal({
   const upi = buildUpiUri("you", Number(amount), state.room);
 
   return (
-    <Dialog title="Record Settlement" onClose={onClose}>
+    <Dialog title="Record payment" onClose={onClose}>
       <form
         className="grid gap-4 p-5"
         onSubmit={(event) => {
@@ -1212,6 +1382,7 @@ function SettlementModal({
           });
         }}
       >
+        <p className="text-sm leading-6 text-zinc-500">Record a payment you made to your roommate. It will update the balance and appear in both roommates’ payment history.</p>
         <div className="grid grid-cols-2 gap-3">
           <div className="grid content-center gap-1 text-xs font-semibold">Paid by<span className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal">{state.room.youName} (you)</span></div>
           <label className="grid gap-1 text-xs font-semibold">Amount<input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
@@ -1225,7 +1396,7 @@ function SettlementModal({
             <a href={upi.uri} className="text-xs font-bold text-zinc-900 underline">Open UPI app</a>
           </div>
         )}
-        <button type="submit" className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white">Record settlement</button>
+        <button type="submit" className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white">Record payment</button>
       </form>
     </Dialog>
   );

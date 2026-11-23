@@ -352,21 +352,31 @@ through Authentication and Firestore rules.
 
 ## 11. Room Membership and Firestore Security
 
-Before live writes are enabled, a room must include a membership model. The minimum target is:
+Each account can own or join multiple rooms. A per-user index supports the room selector while
+the room document remains the data-isolation boundary:
 
 ```text
-rooms/{roomCode}
+users/{uid}/rooms/{roomId}
+  roomId
+  roomName
+  role
+rooms/{roomId}
   members/{uid}
   expenses/{expenseId}
   settlements/{settlementId}
 ```
 
-Require an authenticated member for room reads and writes. Expense creation must set
-`createdByUid == request.auth.uid`. Expense updates and deletes must require that UID. Settlement
-creation and deletion rules must follow the same membership and ownership policy.
+The user-room index is readable only by its owner. Room creation, joining, and index updates must
+be validated atomically with the corresponding room and member documents. Existing accounts with a
+legacy `users/{uid}.roomId` are migrated into the index on first use. The room remains limited to
+two members.
 
-Example rules are illustrative and must be tested against a final schema; they must not be
-deployed until membership, room joining, and invite handling are implemented and reviewed.
+Require an authenticated member for room reads and writes. Expense and payment creation must
+attribute the signed-in user as creator and payer. Updates and deletes are restricted to each
+record's creator. The app subscribes only to the selected room's ledger.
+
+The checked-in rules are a prototype and must be reviewed and validated against the deployed
+Firebase project before broad production use.
 
 ## 12. Vercel Deployment
 
@@ -415,6 +425,8 @@ Complete each batch only after its focused lint/type/test/build validation passe
 - [ ] `you` / `friend` perspective mapping preserves owner-only behavior.
 - [ ] Monthly and all-time balance calculations match the existing app.
 - [ ] Expense CRUD is available only to authenticated room members.
+- [ ] An account can create and join multiple two-person rooms and switch between their ledgers.
+- [ ] A roommate can record a payment they made; both members see the payment and updated balance.
 - [ ] Fixed monthly bills are deduplicated.
 - [ ] Filtered CSV export matches the ledger filter.
 - [ ] UPI links, QR codes, and WhatsApp links are correctly encoded.
@@ -423,3 +435,10 @@ Complete each batch only after its focused lint/type/test/build validation passe
 - [ ] Firestore access is isolated by room and membership.
 - [ ] The production build completes on Vercel.
 - [ ] Firebase live mode is verified only when real credentials are available.
+
+
+________________________________________
+1. User can add more then 2 roommates in the room. (Currently only 2 roommates are allowed)
+2. User can add more then 1 room in the app. (Currently only 1 room is allowed)
+3. Each room should have its own ledger and settlement history and isolated data.
+4. At home page, show the message like "You have to pay {{amount}} to {{friendName}} and {{friendName}} has to pay {{amount}} to you" based on the net balance of the room.
