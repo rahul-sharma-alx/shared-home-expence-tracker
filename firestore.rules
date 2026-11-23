@@ -202,14 +202,14 @@ service cloud.firestore {
 
       match /rooms/{roomId} {
         allow get, list: if isOwner(uid);
-        allow create: if isOwner(uid)
+        allow create: if (isOwner(uid) || isRoomOwner(roomId))
           && isValidRoomMembership(request.resource.data, roomId)
           && existsAfter(roomPath(roomId))
           && existsAfter(memberPath(roomId, uid))
           && getAfter(memberPath(roomId, uid)).data.uid == uid
           && getAfter(memberPath(roomId, uid)).data.role == request.resource.data.role
           && (
-            request.resource.data.role == "roommate"
+            (isOwner(uid) && request.resource.data.role == "roommate")
             || getAfter(roomPath(roomId)).data.name == request.resource.data.roomName
           );
         allow update: if isAuthenticated()
