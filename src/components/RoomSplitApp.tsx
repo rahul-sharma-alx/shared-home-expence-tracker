@@ -944,7 +944,6 @@ export function RoomSplitApp() {
         <ExpenseModal
           expense={editingExpense}
           state={state}
-          month={month}
           authUid={authUser?.uid || ""}
           busy={formBusy}
           getIdToken={async () => {
@@ -1313,7 +1312,6 @@ function Dialog({
 function ExpenseModal({
   expense,
   state,
-  month,
   authUid,
   busy,
   getIdToken,
@@ -1322,7 +1320,6 @@ function ExpenseModal({
 }: {
   expense: Expense | null;
   state: RoomState;
-  month: string;
   authUid: string;
   busy: boolean;
   getIdToken: () => Promise<string>;
@@ -1331,7 +1328,9 @@ function ExpenseModal({
 }) {
   const [title, setTitle] = useState(expense?.title || "");
   const [amount, setAmount] = useState(expense?.amount?.toString() || "");
-  const [date, setDate] = useState(expense?.date || (month === "all" ? getLocalDateString() : `${month}-01`));
+  const [date, setDate] = useState(expense?.date || "");
+  const [isDateLoading, setIsDateLoading] = useState(!expense);
+  const [serverDateError, setServerDateError] = useState("");
   const [category, setCategory] = useState<ExpenseCategoryId>(expense?.category || "vegetables");
   const [split, setSplit] = useState<ExpenseSplit>(expense?.split || "50-50");
   const [note, setNote] = useState(expense?.note || "");
@@ -1344,6 +1343,43 @@ function ExpenseModal({
     && numericAmount > 0
     && numericAmount <= 1_000_000_000;
 
+  useEffect(() => {
+    if (expense) return;
+
+    const controller = new AbortController();
+    async function loadServerDate() {
+      try {
+        const response = await fetch("/api/server-date", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Server date request failed.");
+
+        const result: unknown = await response.json();
+        if (
+          !result
+          || typeof result !== "object"
+          || !("date" in result)
+          || typeof result.date !== "string"
+          || !/^\d{4}-\d{2}-\d{2}$/.test(result.date)
+        ) {
+          throw new Error("Server returned an invalid date.");
+        }
+
+        setDate(result.date);
+      } catch {
+        if (!controller.signal.aborted) {
+          setServerDateError("Today's server date could not be loaded. Please select a date manually.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsDateLoading(false);
+      }
+    }
+
+    void loadServerDate();
+    return () => controller.abort();
+  }, [expense]);
+
   return (
     <Dialog title={expense ? "Edit Expense" : "Add Expense"} onClose={onClose}>
       <form
@@ -1354,7 +1390,7 @@ function ExpenseModal({
           if (showVoicePreview && !isVoiceConfirmingRef.current) return;
           isVoiceConfirmingRef.current = false;
           const numericAmount = Number(amount);
-          if (!title.trim() || !numericAmount || numericAmount <= 0) return;
+          if (!title.trim() || !numericAmount || numericAmount <= 0 || !date) return;
           onSave({
             id: expense?.id || createId(),
             title: title.trim(),
@@ -1390,7 +1426,7 @@ function ExpenseModal({
             split={split}
             note={note}
             confirmLabel={expense ? "Confirm & save changes" : "Confirm & add expense"}
-            confirmDisabled={busy || !canConfirmVoiceExpense}
+            confirmDisabled={busy || isDateLoading || !date || !canConfirmVoiceExpense}
             isSaving={busy}
             onEdit={() => setShowVoicePreview(false)}
             onConfirm={() => {
@@ -1404,8 +1440,10 @@ function ExpenseModal({
         <label className="grid gap-1 text-xs font-semibold">Title<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1 text-xs font-semibold">Amount<input required min="0.01" max="1000000000" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
-          <label className="grid gap-1 text-xs font-semibold">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
+          <label className="grid gap-1 text-xs font-semibold">Date<input required type="date" value={date} disabled={isDateLoading} onChange={(event) => { setDate(event.target.value); setServerDateError(""); }} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal disabled:bg-zinc-100" /></label>
         </div>
+        {isDateLoading && <p role="status" className="text-xs text-zinc-500">Loading today&apos;s date...</p>}
+        {serverDateError && <p role="alert" className="text-xs text-red-600">{serverDateError}</p>}
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1 text-xs font-semibold">Category<select value={category} onChange={(event) => setCategory(event.target.value as ExpenseCategoryId)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal">{CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <div className="grid content-center gap-1 text-xs font-semibold">Paid by<span className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal">{state.room.youName} (you)</span></div>
@@ -1413,7 +1451,7 @@ function ExpenseModal({
         <label className="grid gap-1 text-xs font-semibold">Split<select value={split} onChange={(event) => setSplit(event.target.value as ExpenseSplit)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal"><option value="50-50">50-50</option><option value="100-other">100% other person</option><option value="personal">Personal</option></select></label>
         <label className="grid gap-1 text-xs font-semibold">Note<textarea maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         {!showVoicePreview && (
-          <button type="submit" disabled={busy} className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : expense ? "Save changes" : "Add expense"}</button>
+          <button type="submit" disabled={busy || isDateLoading || !date} className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : isDateLoading ? "Loading date…" : expense ? "Save changes" : "Add expense"}</button>
         )}
       </form>
     </Dialog>
