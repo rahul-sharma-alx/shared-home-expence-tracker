@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { AccountMenu } from "@/src/components/AccountMenu";
 import { VoiceExpenseInput } from "@/src/components/VoiceExpenseInput";
+import { VoiceExpensePreview } from "@/src/components/VoiceExpensePreview";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement } from "chart.js";
 import { Doughnut, Bar } from "react-chartjs-2";
 import { CATEGORIES, type Expense, type ExpenseCategoryId, type ExpenseSplit } from "@/src/features/expenses/types";
@@ -946,6 +947,10 @@ export function RoomSplitApp() {
           month={month}
           authUid={authUser?.uid || ""}
           busy={formBusy}
+          getIdToken={async () => {
+            if (!authUser) throw new Error("Please sign in again before using voice entry.");
+            return authUser.getIdToken();
+          }}
           onClose={() => setModal(null)}
           onSave={saveExpense}
         />
@@ -1311,6 +1316,7 @@ function ExpenseModal({
   month,
   authUid,
   busy,
+  getIdToken,
   onClose,
   onSave,
 }: {
@@ -1319,6 +1325,7 @@ function ExpenseModal({
   month: string;
   authUid: string;
   busy: boolean;
+  getIdToken: () => Promise<string>;
   onClose: () => void;
   onSave: (expense: Expense) => void;
 }) {
@@ -1328,13 +1335,24 @@ function ExpenseModal({
   const [category, setCategory] = useState<ExpenseCategoryId>(expense?.category || "vegetables");
   const [split, setSplit] = useState<ExpenseSplit>(expense?.split || "50-50");
   const [note, setNote] = useState(expense?.note || "");
+  const [showVoicePreview, setShowVoicePreview] = useState(false);
+  const expenseFormRef = useRef<HTMLFormElement>(null);
+  const isVoiceConfirmingRef = useRef(false);
+  const numericAmount = Number(amount);
+  const canConfirmVoiceExpense = Boolean(title.trim())
+    && Number.isFinite(numericAmount)
+    && numericAmount > 0
+    && numericAmount <= 1_000_000_000;
 
   return (
     <Dialog title={expense ? "Edit Expense" : "Add Expense"} onClose={onClose}>
       <form
+        ref={expenseFormRef}
         className="grid gap-4 p-5"
         onSubmit={(event) => {
           event.preventDefault();
+          if (showVoicePreview && !isVoiceConfirmingRef.current) return;
+          isVoiceConfirmingRef.current = false;
           const numericAmount = Number(amount);
           if (!title.trim() || !numericAmount || numericAmount <= 0) return;
           onSave({
@@ -1353,12 +1371,36 @@ function ExpenseModal({
         }}
       >
         <VoiceExpenseInput
+          getIdToken={getIdToken}
           onRecognized={(draft) => {
             setTitle(draft.title);
             if (draft.amount) setAmount(draft.amount);
             if (draft.category) setCategory(draft.category);
+            if (draft.note) setNote(draft.note);
+            setShowVoicePreview(true);
           }}
         />
+        {showVoicePreview && (
+          <VoiceExpensePreview
+            title={title}
+            amount={amount}
+            date={date}
+            category={category}
+            payer={`${state.room.youName} (you)`}
+            split={split}
+            note={note}
+            confirmLabel={expense ? "Confirm & save changes" : "Confirm & add expense"}
+            confirmDisabled={busy || !canConfirmVoiceExpense}
+            isSaving={busy}
+            onEdit={() => setShowVoicePreview(false)}
+            onConfirm={() => {
+              const form = expenseFormRef.current;
+              if (!form?.reportValidity()) return;
+              isVoiceConfirmingRef.current = true;
+              form.requestSubmit();
+            }}
+          />
+        )}
         <label className="grid gap-1 text-xs font-semibold">Title<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1 text-xs font-semibold">Amount<input required min="0.01" max="1000000000" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
@@ -1370,7 +1412,9 @@ function ExpenseModal({
         </div>
         <label className="grid gap-1 text-xs font-semibold">Split<select value={split} onChange={(event) => setSplit(event.target.value as ExpenseSplit)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal"><option value="50-50">50-50</option><option value="100-other">100% other person</option><option value="personal">Personal</option></select></label>
         <label className="grid gap-1 text-xs font-semibold">Note<textarea maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
-        <button type="submit" disabled={busy} className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : expense ? "Save changes" : "Add expense"}</button>
+        {!showVoicePreview && (
+          <button type="submit" disabled={busy} className="rounded-lg bg-zinc-900 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : expense ? "Save changes" : "Add expense"}</button>
+        )}
       </form>
     </Dialog>
   );

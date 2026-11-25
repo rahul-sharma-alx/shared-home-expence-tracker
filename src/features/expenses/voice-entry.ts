@@ -1,10 +1,21 @@
-import type { ExpenseCategoryId } from "./types";
+import { CATEGORIES, type ExpenseCategoryId } from "./types";
 
 export type VoiceExpenseDraft = {
   title: string;
   amount: string;
   category: ExpenseCategoryId | null;
+  note: string;
 };
+
+export function isVoiceExpenseDraft(value: unknown): value is VoiceExpenseDraft {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as Record<string, unknown>;
+
+  return typeof draft.title === "string"
+    && typeof draft.amount === "string"
+    && CATEGORIES.some((category) => category.id === draft.category)
+    && typeof draft.note === "string";
+}
 
 const categoryKeywords: Array<{ id: ExpenseCategoryId; pattern: RegExp }> = [
   { id: "rent", pattern: /\b(?:rent|lease)\b/i },
@@ -35,5 +46,6 @@ export function parseVoiceExpense(transcript: string): VoiceExpenseDraft {
     title: spokenTitle || (amount ? "Expense" : transcript.trim()),
     amount,
     category: categoryKeywords.find(({ pattern }) => pattern.test(transcript))?.id || null,
+    note: "",
   };
 }

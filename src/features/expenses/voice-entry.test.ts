@@ -7,6 +7,7 @@ describe("parseVoiceExpense", () => {
       title: "groceries",
       amount: "1250",
       category: "groceries",
+      note: "",
     });
   });
 
@@ -15,6 +16,7 @@ describe("parseVoiceExpense", () => {
       title: "Wi-Fi bill",
       amount: "",
       category: "internet",
+      note: "",
     });
   });
 
@@ -23,6 +25,7 @@ describe("parseVoiceExpense", () => {
       title: "Expense",
       amount: "500",
       category: null,
+      note: "",
     });
   });
 });

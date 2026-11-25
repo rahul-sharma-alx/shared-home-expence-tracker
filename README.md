@@ -10,9 +10,10 @@ Firebase sign-in is required. New accounts start without a room or ledger entrie
 2. Enable **Email/Password**, **Google**, and **Phone** under Firebase Authentication -> Sign-in method. Phone sign-in also requires authorized domains and SMS region policy.
 3. Create a Cloud Firestore database.
 4. Copy `.env.example` to `.env.local` and fill in the Firebase Web app configuration values.
-5. Add `localhost` and your deployed host to Firebase Authentication's authorized domains.
-6. Publish the prototype rules with `npx firebase-tools deploy --only firestore:rules --project shared-room-expence-tracker`, or paste [`firestore.rules`](./firestore.rules) into the Firestore Rules editor.
-7. Start the app:
+5. Add an OpenRouter API key to `OPENROUTER_API_KEY` in `.env.local` for Hindi/Hinglish voice expense parsing. Keep it server-only; do not rename it with a `NEXT_PUBLIC_` prefix. `OPENROUTER_MODEL` is optional.
+6. Add `localhost` and your deployed host to Firebase Authentication's authorized domains.
+7. Publish the prototype rules with `npx firebase-tools deploy --only firestore:rules --project shared-room-expence-tracker`, or paste [`firestore.rules`](./firestore.rules) into the Firestore Rules editor.
+8. Start the app:
 
    ```bash
    npm install
@@ -27,7 +28,7 @@ Firebase Web configuration is public client configuration. Do not put Firebase A
 - A room creator can share an invite link with one roommate. A room has at most two members and its own budget, expenses, and payment history.
 - Expense and payment records are scoped to `rooms/{roomId}`. A roommate records a payment they personally made; both members see the payment and updated balance.
 - The ledger opens on the current calendar month, so each new month starts with a zero monthly total. Past expenses remain available through month selection and All time.
-- Expense forms support voice drafts in compatible browsers, pre-filling the title, amount, and recognized category for review before saving. Speech processing depends on the browser and may happen online.
+- Expense forms support Hindi/Hinglish and English voice drafts in compatible browsers. Browser speech recognition transcribes the audio; the authenticated server route uses OpenRouter to prefill the title, amount, category, and any explicitly spoken note. A preview is shown and the user must confirm before the expense is saved. The signed-in user is always the payer. Speech recognition and transcript processing may use online services; configure an OpenRouter key to enable parsing. OpenRouter requests deny provider data collection, but providers may retain safety logs.
 - Firestore rules require room membership and enforce that only the record creator can edit or delete their expense or payment.
 - The client does not provide a switch to act as the other roommate. Contact details remain managed by each individual account.
 - Room profiles, expenses, and payments are stored in Firestore; no demo data is stored in the browser.
