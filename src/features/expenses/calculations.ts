@@ -81,6 +81,13 @@ export function formatINR(value: number) {
   })}`;
 }
 
+export function getSettlementMessage(net: number, friendName: string) {
+  if (Math.abs(net) < 1) return `You and ${friendName} are all settled up.`;
+  return net > 0
+    ? `${friendName} has to pay ${formatINR(net)} to you.`
+    : `You have to pay ${formatINR(Math.abs(net))} to ${friendName}.`;
+}
+
 export function buildUpiUri(
   from: "you" | "friend",
   amount: number,

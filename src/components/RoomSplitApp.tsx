@@ -32,10 +32,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { AccountMenu } from "@/src/components/AccountMenu";
+import { VoiceExpenseInput } from "@/src/components/VoiceExpenseInput";
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement } from "chart.js";
 import { Doughnut, Bar } from "react-chartjs-2";
 import { CATEGORIES, type Expense, type ExpenseCategoryId, type ExpenseSplit } from "@/src/features/expenses/types";
-import { calculateBalances, categoryTotals, filterExpensesByMonth, formatINR, buildUpiUri, buildWhatsAppUri, exportFilteredCsv } from "@/src/features/expenses/calculations";
+import { calculateBalances, categoryTotals, filterExpensesByMonth, formatINR, getSettlementMessage, buildUpiUri, buildWhatsAppUri, exportFilteredCsv } from "@/src/features/expenses/calculations";
 import type { Settlement } from "@/src/features/settlements/types";
 import type { RoomPerspective, RoomState } from "@/src/features/room/types";
 import { firebaseAuth, firestore, isFirebaseConfigured } from "@/src/lib/firebase/client";
@@ -144,6 +146,7 @@ export function RoomSplitApp() {
         firebaseAuth,
         (user) => {
           setAuthUser(user);
+          if (user) setMonth(getLocalDateString().slice(0, 7));
           setAuthReady(true);
           setProfile(null);
           setCloudRoom(null);
@@ -289,6 +292,11 @@ export function RoomSplitApp() {
   }, [state.expenses, month, query, categoryFilter, payerFilter]);
 
   const periodExpenses = useMemo(() => filterExpensesByMonth(state.expenses, month), [state.expenses, month]);
+  const availableMonths = useMemo(() => {
+    const months = new Set(state.expenses.map((expense) => expense.date.slice(0, 7)));
+    if (month !== "all") months.add(month);
+    return [...months].sort((a, b) => b.localeCompare(a));
+  }, [state.expenses, month]);
   const balances = useMemo(
     () => calculateBalances(periodExpenses, state.settlements, month),
     [periodExpenses, state.settlements, month],
@@ -536,6 +544,17 @@ export function RoomSplitApp() {
       : balances.net > 0
         ? `${state.room.friendName} owes ${state.room.youName}`
         : `${state.room.youName} owes ${state.room.friendName}`;
+  const settlementMessage = getSettlementMessage(
+    balances.net,
+    state.room.friendName,
+  );
+  const periodLabel = month === "all"
+    ? "All time"
+    : new Intl.DateTimeFormat("en-IN", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${month}-01T00:00:00Z`));
   const budgetPercent = state.room.budgetCap
     ? (balances.totalSpent / state.room.budgetCap) * 100
     : 0;
@@ -553,8 +572,8 @@ export function RoomSplitApp() {
   const payerData = {
     labels: CATEGORIES.map((category) => category.name),
     datasets: [
-      { label: state.room.youName, data: CATEGORIES.map((category) => periodExpenses.filter((expense) => expense.category === category.id && expense.paidBy === "you").reduce((sum, expense) => sum + expense.amount, 0)), backgroundColor: "#18181B" },
-      { label: state.room.friendName, data: CATEGORIES.map((category) => periodExpenses.filter((expense) => expense.category === category.id && expense.paidBy === "friend").reduce((sum, expense) => sum + expense.amount, 0)), backgroundColor: "#0f766e" },
+      { label: state.room.youName, data: CATEGORIES.map((category) => periodExpenses.filter((expense) => expense.category === category.id && expense.paidBy === "you").reduce((sum, expense) => sum + expense.amount, 0)), backgroundColor: "#8bd9cf" },
+      { label: state.room.friendName, data: CATEGORIES.map((category) => periodExpenses.filter((expense) => expense.category === category.id && expense.paidBy === "friend").reduce((sum, expense) => sum + expense.amount, 0)), backgroundColor: "#537f7a" },
     ],
   };
 
@@ -565,6 +584,10 @@ export function RoomSplitApp() {
     upiId: "",
     roomId: null,
   };
+  const googleProvider = authUser?.providerData.find(
+    (provider) => provider.providerId === GoogleAuthProvider.PROVIDER_ID,
+  );
+  const profilePhotoUrl = googleProvider?.photoURL || (googleProvider ? authUser?.photoURL : null) || null;
   const availableRooms = roomMemberships.map(({ roomId, roomName }) => ({ roomId, roomName }));
   if (
     profile?.roomId
@@ -616,6 +639,7 @@ export function RoomSplitApp() {
           onBudgetChange={setBudgetCap}
           onCreate={handleCreateRoom}
           onJoin={handleJoinRoom}
+          photoUrl={profilePhotoUrl}
           onOpenProfile={() => setProfileOpen(true)}
           onSignOut={handleSignOut}
         />
@@ -635,7 +659,7 @@ export function RoomSplitApp() {
   }
 
   return (
-    <div className="min-h-dvh bg-zinc-50 text-zinc-900">
+    <div className="roomsplit-shell min-h-dvh bg-zinc-50 text-zinc-900">
       <header className="app-header sticky top-0 z-30 border-b border-zinc-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
@@ -651,8 +675,13 @@ export function RoomSplitApp() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <button type="button" onClick={() => setProfileOpen(true)} aria-label="Open profile" className="max-w-20 truncate rounded-lg border border-zinc-200 px-2 py-2 text-[11px] font-semibold sm:max-w-none sm:px-3 sm:text-xs">{accountProfile.name || authUser?.displayName || "Profile"}</button>
-            <button type="button" onClick={handleSignOut} aria-label="Sign out" className="rounded-lg border border-zinc-200 px-2 py-2 text-[11px] font-semibold text-zinc-600 sm:px-3 sm:text-xs"><span className="sm:hidden">Log out</span><span className="hidden sm:inline">Sign out</span></button>
+            <AccountMenu
+              displayName={accountProfile.name || authUser.displayName || "Profile"}
+              email={authUser.email}
+              photoUrl={profilePhotoUrl}
+              onOpenProfile={() => setProfileOpen(true)}
+              onSignOut={handleSignOut}
+            />
             <button type="button" onClick={() => openExpense()} aria-label="Add expense" className="flex h-9 items-center gap-2 rounded-lg bg-zinc-900 px-2.5 text-xs font-semibold text-white sm:px-3">
               <Plus size={15} /> <span className="hidden sm:inline">Add Expense</span>
             </button>
@@ -724,12 +753,22 @@ export function RoomSplitApp() {
               className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
               aria-label="Month"
             >
-              {Array.from(new Set(state.expenses.map((expense) => expense.date.slice(0, 7))))
-                .sort((a, b) => b.localeCompare(a))
+              {availableMonths
                 .map((key) => <option key={key} value={key}>{new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${key}-01T00:00:00Z`))}</option>)}
               <option value="all">All time</option>
             </select>
           </div>
+        )}
+
+        {tab === "overview" && (
+          <section aria-label="Settlement summary" aria-live="polite" className="settlement-summary mb-5 rounded-2xl border border-zinc-200 bg-white p-4 sm:p-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{periodLabel} settlement</p>
+            <h2 className="mt-2 text-base font-bold sm:text-lg">{settlementMessage}</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">
+              Room expenses: {formatINR(balances.totalSpent)} · {state.room.youName} paid {formatINR(balances.youPaid)} · {state.room.friendName} paid {formatINR(balances.friendPaid)}.
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">Based on this room’s expenses, split settings, and payments recorded in this period.</p>
+          </section>
         )}
 
         {tab !== "security" && (
@@ -764,8 +803,8 @@ export function RoomSplitApp() {
                 </p>
               )}
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <div className="h-56"><Doughnut data={doughnutData} options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 11 } } } } }} /></div>
-                <div className="h-56"><Bar data={payerData} options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom" } }, scales: { y: { beginAtZero: true }, x: { ticks: { font: { size: 9 } } } } }} /></div>
+                <div className="h-56"><Doughnut data={doughnutData} options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { color: "#a4acab", boxWidth: 10, font: { size: 11 } } } } }} /></div>
+                <div className="h-56"><Bar data={payerData} options={{ maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { color: "#a4acab" } } }, scales: { y: { beginAtZero: true, ticks: { color: "#a4acab" }, grid: { color: "rgba(255,255,255,0.08)" } }, x: { ticks: { color: "#a4acab", font: { size: 9 } }, grid: { display: false } } } }} /></div>
               </div>
             </section>
             <section className="rounded-xl border border-zinc-200 bg-white p-5">
@@ -947,7 +986,7 @@ export function RoomSplitApp() {
 
 function CenteredMessage({ message, error = false }: { message: string; error?: boolean }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-zinc-50 p-6">
+    <main className="loading-shell grid min-h-screen place-items-center bg-zinc-50 p-6">
       <div className={`max-w-lg rounded-xl border bg-white p-6 text-center text-sm leading-6 shadow-sm ${error ? "border-red-200 text-red-800" : "border-zinc-200 text-zinc-600"}`}>
         <div className="mb-3 text-lg font-bold text-zinc-900">RoomSplit</div>
         {message}
@@ -1066,11 +1105,12 @@ function LoginScreen({
   const displayedError = localError || error;
 
   return (
-    <main className="grid min-h-screen place-items-center bg-zinc-50 p-5">
-      <section className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-        <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-zinc-900 text-white"><Home size={22} /></div>
-        <h1 className="mt-5 text-center text-2xl font-bold tracking-tight">RoomSplit</h1>
-        <p className="mt-2 text-center text-sm leading-6 text-zinc-500">Share home expenses, keep the ledger clear, and settle up with your roommate.</p>
+    <main className="auth-shell grid place-items-center bg-zinc-50 px-5 py-8">
+      <section className="auth-card w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
+        <div className="auth-brand-mark mx-auto grid h-14 w-14 place-items-center rounded-2xl"><Home size={24} /></div>
+        <p className="mt-5 text-center text-[10px] font-bold uppercase tracking-[0.24em] text-zinc-400">RoomSplit · shared living</p>
+        <h1 className="mt-3 text-center text-2xl font-bold tracking-tight">Feel at home with your expenses.</h1>
+        <p className="mt-2 text-center text-sm leading-6 text-zinc-500">Track monthly spending, keep every room organized, and settle up with clarity.</p>
         {displayedError && <p role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{displayedError}</p>}
         {notice && <p role="status" className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>}
         <div className="mt-6 grid grid-cols-2 rounded-lg bg-zinc-100 p-1">
@@ -1139,6 +1179,7 @@ function RoomSetupScreen({
   onBudgetChange,
   onCreate,
   onJoin,
+  photoUrl,
   onOpenProfile,
   onSignOut,
 }: {
@@ -1153,18 +1194,22 @@ function RoomSetupScreen({
   onBudgetChange: (value: string) => void;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onJoin: () => void;
+  photoUrl: string | null;
   onOpenProfile: () => void;
   onSignOut: () => void;
 }) {
   return (
-    <main className="min-h-screen bg-zinc-50 px-4 py-8">
+    <main className="setup-shell min-h-screen bg-zinc-50 px-4 py-8">
       <div className="mx-auto max-w-3xl">
         <header className="mb-8 flex items-center justify-between">
           <div><h1 className="text-xl font-bold">Welcome, {profile.name || authUser.displayName || "there"}</h1><p className="mt-1 text-sm text-zinc-500">{authUser.email}</p></div>
-          <div className="flex gap-2">
-            <button type="button" onClick={onOpenProfile} className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold">Profile</button>
-            <button type="button" onClick={onSignOut} className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold">Sign out</button>
-          </div>
+          <AccountMenu
+            displayName={profile.name || authUser.displayName || "Profile"}
+            email={authUser.email}
+            photoUrl={photoUrl}
+            onOpenProfile={onOpenProfile}
+            onSignOut={onSignOut}
+          />
         </header>
         {error && <p role="alert" className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
         {inviteToken && (
@@ -1175,7 +1220,7 @@ function RoomSetupScreen({
             <button type="button" disabled={busy} onClick={onJoin} className="mt-4 rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Joining…" : "Join room"}</button>
           </section>
         )}
-        <section className="rounded-xl border border-zinc-200 bg-white p-6">
+        <section className="setup-card rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6">
           <h2 className="text-lg font-bold">Create a room</h2>
           <p className="mt-1 text-sm text-zinc-500">Create a shared ledger, then invite one roommate using a private link.</p>
           <form onSubmit={onCreate} className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -1222,7 +1267,7 @@ function ProfileModal({
 
 function Kpi({ label, value, detail, accent }: { label: string; value: string; detail: string; accent?: boolean }) {
   return (
-    <article className={`rounded-xl border p-4 ${accent ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white"}`}>
+    <article className={`kpi-card ${accent ? "kpi-card-highlight" : ""} rounded-2xl border p-4`}>
       <p className={`text-xs ${accent ? "text-zinc-300" : "text-zinc-500"}`}>{label}</p>
       <p className="mt-2 text-lg font-bold sm:text-2xl">{value}</p>
       <p className={`mt-1 text-xs ${accent ? "text-zinc-300" : "text-zinc-400"}`}>{detail}</p>
@@ -1249,7 +1294,7 @@ function Dialog({
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-label={title} className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-xl bg-white shadow-2xl">
+      <section role="dialog" aria-modal="true" aria-label={title} className="dialog-panel max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4">
           <h2 className="font-bold">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close dialog" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100"><X size={17} /></button>
@@ -1307,6 +1352,13 @@ function ExpenseModal({
           });
         }}
       >
+        <VoiceExpenseInput
+          onRecognized={(draft) => {
+            setTitle(draft.title);
+            if (draft.amount) setAmount(draft.amount);
+            if (draft.category) setCategory(draft.category);
+          }}
+        />
         <label className="grid gap-1 text-xs font-semibold">Title<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1 text-xs font-semibold">Amount<input required min="0.01" max="1000000000" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-normal" /></label>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBalances, exportFilteredCsv, filterExpensesByMonth } from "./calculations";
+import { calculateBalances, exportFilteredCsv, filterExpensesByMonth, getSettlementMessage } from "./calculations";
 import type { Expense } from "./types";
 import type { Settlement } from "@/src/features/settlements/types";
 
@@ -23,8 +23,16 @@ describe("expense calculations", () => {
       createdBy: "friend",
     };
 
-    expect(calculateBalances(sharedExpenses, []).net).toBe(500);
+    const balance = calculateBalances(sharedExpenses, []);
+    expect(balance).toMatchObject({ totalSpent: 5000, youPaid: 3000, friendPaid: 2000, net: 500 });
+    expect(getSettlementMessage(balance.net, "User 2"))
+      .toBe("User 2 has to pay ₹500 to you.");
     expect(calculateBalances(sharedExpenses, [payment]).net).toBe(0);
+  });
+
+  it("explains who should pay whom for either balance direction", () => {
+    expect(getSettlementMessage(-500, "User 2")).toBe("You have to pay ₹500 to User 2.");
+    expect(getSettlementMessage(0, "User 2")).toBe("You and User 2 are all settled up.");
   });
 
   it("calculates 50-50 splits", () => {
@@ -55,5 +63,18 @@ describe("expense calculations", () => {
     const csv = exportFilteredCsv([expenses[0]]);
     expect(csv).toContain('"Rent"');
     expect(csv).toContain('"1000"');
+  });
+
+  it("starts a month with zero room expenses without removing prior records", () => {
+    expect(filterExpensesByMonth(expenses, "2026-12")).toEqual([]);
+    expect(calculateBalances(expenses, [], "2026-12")).toEqual({
+      totalSpent: 0,
+      youPaid: 0,
+      friendPaid: 0,
+      youShare: 0,
+      friendShare: 0,
+      net: 0,
+    });
+    expect(expenses).toHaveLength(3);
   });
 });

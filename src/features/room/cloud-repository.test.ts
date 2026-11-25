@@ -7,6 +7,7 @@ import {
   type CloudRoom,
   type RoomMember,
 } from "./cloud-repository";
+import { calculateBalances, getSettlementMessage } from "../expenses/calculations";
 import type { Expense } from "@/src/features/expenses/types";
 import type { Settlement } from "@/src/features/settlements/types";
 
@@ -58,6 +59,22 @@ describe("roommate perspective mapping", () => {
     expect(roommateView.room.youName).toBe("Roommate");
     expect(roommateView.expenses[0].createdBy).toBe("you");
     expect(roommateView.settlements[0].createdByUid).toBe("uid-roommate");
+  });
+
+  it("shows each roommate the same net balance from their own perspective", () => {
+    const expenses: Expense[] = [
+      { ...expense, id: "owner-expense", amount: 3000, paidByUid: "uid-owner", createdByUid: "uid-owner" },
+      { ...expense, id: "roommate-expense", amount: 2000, paidByUid: "uid-roommate", createdByUid: "uid-roommate" },
+    ];
+    const ownerView = toRoomState(room, members, expenses, [], "uid-owner");
+    const roommateView = toRoomState(room, members, expenses, [], "uid-roommate");
+    const ownerBalance = calculateBalances(ownerView.expenses, []);
+    const roommateBalance = calculateBalances(roommateView.expenses, []);
+
+    expect(getSettlementMessage(ownerBalance.net, ownerView.room.friendName))
+      .toBe("Roommate has to pay ₹500 to you.");
+    expect(getSettlementMessage(roommateBalance.net, roommateView.room.friendName))
+      .toBe("You have to pay ₹500 to Owner.");
   });
 });
 

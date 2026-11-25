@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "designSystem": {
+    "slug": "glassmorphism",
+    "path": "design-systems/glassmorphism"
+  },
+  "skill": {
+    "slug": "mobile-app",
+    "path": "design-templates/mobile-app",
+    "kind": "design-template",
+    "mode": "prototype"
+  },
+  "boundAt": "2026-11-25T16:53:01Z"
+}

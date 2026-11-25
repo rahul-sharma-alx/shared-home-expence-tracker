@@ -26,6 +26,8 @@ Firebase Web configuration is public client configuration. Do not put Firebase A
 - Each account has a private profile and can belong to multiple rooms. The room selector switches the active ledger without changing the signed-in user.
 - A room creator can share an invite link with one roommate. A room has at most two members and its own budget, expenses, and payment history.
 - Expense and payment records are scoped to `rooms/{roomId}`. A roommate records a payment they personally made; both members see the payment and updated balance.
+- The ledger opens on the current calendar month, so each new month starts with a zero monthly total. Past expenses remain available through month selection and All time.
+- Expense forms support voice drafts in compatible browsers, pre-filling the title, amount, and recognized category for review before saving. Speech processing depends on the browser and may happen online.
 - Firestore rules require room membership and enforce that only the record creator can edit or delete their expense or payment.
 - The client does not provide a switch to act as the other roommate. Contact details remain managed by each individual account.
 - Room profiles, expenses, and payments are stored in Firestore; no demo data is stored in the browser.
